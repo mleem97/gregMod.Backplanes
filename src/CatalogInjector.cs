@@ -1,0 +1,1482 @@
+using System;
+using System.Collections.Generic;
+using System.Globalization;
+using System.Linq;
+using Il2Cpp;
+using Il2CppInterop.Runtime.InteropTypes.Arrays;
+using MelonLoader;
+using UnityEngine;
+
+namespace GregMod.Backplanes
+{
+    /// <summary>
+    /// Typed-first refactor of the v1.x reflection injector.
+    ///
+    /// What changed vs BackplaneBoostServers v1.0.1:
+    /// <list type="bullet">
+    /// <item>Direct Il2Cpp types everywhere on the hot path (Server, CableLink,
+    ///   ComputerShop, ShopItem/SO). The stringly-typed ReflectionUtil graph scans
+    ///   (ScanObjectGraph / EnumerateLikelyStaticRoots / FindObjectsOfTypeAll via
+    ///   reflection) are gone — shop registration is a single typed scan of
+    ///   ComputerShop.shopItems. This removes the shop-open lag and the
+    ///   cross-mod interference (custom color cables/racks, Svc Service).</item>
+    /// <item>The ShopCartItem.AddSpawnedItem hook of v1.x is DEAD CODE in the
+    ///   current game build (no such method exists, Harmony silently skipped it),
+    ///   so bought servers were never configured at spawn time. v2 configures
+    ///   spawns in the live ComputerShop.SpawnPhysicalItem postfix instead.</item>
+    /// <item>Save/load repair is a time-boxed sweep (Server.Start/Awake/
+    ///   OnLoadingComplete postfixes + 1/sec FindObjectsOfType sweep) instead of
+    ///   an always-on repair that fought live links. No Server.Awake/Start work
+    ///   happens outside the window, so no per-frame cost and no recursion.</item>
+    /// <item>All repair entry is guarded by RepairGuard (native-pointer keyed),
+    ///   fixing the 0xC00000FD stack-overflow crash on saves with modded servers.</item>
+    /// <item>Connected ports (cableIDsOnLink != 0 or insertedSFP set) are never
+    ///   rewritten — fixes ports dropping to 0G and refusing cables after reload.</item>
+    /// <item>Cable-family enforcement is warn-only and NEVER blocks
+    ///   CableLink.InteractOnClick (always returns true).</item>
+    /// <item>Spec resolution is strict name-based; the v1.x price-only fallback
+    ///   (phantom cart duplicates, vanilla servers misconfigured) is removed.</item>
+    /// <item>Registry load is column-order tolerant and migrates legacy
+    ///   dc_automator_*/bbs_* IDs to canonical greg_backplanes_* IDs.</item>
+    /// </list>
+    /// </summary>
+    internal sealed class CatalogInjector
+    {
+        private readonly RuntimeVariantRegistry _registry = new RuntimeVariantRegistry();
+
+        // variantId -> registered (per scene)
+        private readonly HashSet<string> _registeredIds =
+            new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        // Varianten-ItemID (9001-9008) -> Base-ItemID (fuer GetPrefabForItem-Mapping).
+        private readonly Dictionary<int, int> _variantToBaseId = new Dictionary<int, int>();
+
+        // Pending purchases awaiting rack insertion (bounded, expiring).
+        private readonly Queue<PendingInsertion> _pendingInsertions = new Queue<PendingInsertion>();
+
+        // Spawn uid -> spec (correlated via ComputerShop.spawnedItems).
+        private readonly Dictionary<int, ServerVariantSpec> _spawnedSpecsByUid = new Dictionary<int, ServerVariantSpec>();
+
+        // Spawn uid -> Erstellzeitpunkt: verwaiste UIDs laufen nach 60 s aus,
+        // damit der 1/sec-Sweep nicht dauerhaft weiterlaeuft (Lag/Repair-Loop).
+        private readonly Dictionary<int, DateTime> _spawnedUidCreatedAt = new Dictionary<int, DateTime>();
+
+        // Native server pointer -> spec, recorded at spawn-configure time.
+        private readonly Dictionary<IntPtr, ServerVariantSpec> _pendingSpecsByPointer = new Dictionary<IntPtr, ServerVariantSpec>();
+
+        // serverId strings already repaired this scene (stable string keys are fine here —
+        // this is a done-marker, not a re-entrancy guard).
+        private readonly HashSet<string> _repairedServerIds =
+            new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        private DateTime _repairWindowUntil = DateTime.MinValue;
+        private DateTime _lastSweepAt = DateTime.MinValue;
+        private bool _sweepSummaryLogged;
+        private bool _shopDumped;
+        private int _sweepRepaired;
+
+        // Watchlist: erfolgreich konfigurierte Varianten-Server. Wird alle 5 s
+        // geprueft (auch ausserhalb des Repair-Fensters): Falls das Spiel Werte
+        // nachtraeglich zuruecksetzt, wird sofort neu konfiguriert + geloggt.
+        // Managed Wrapper halten (zerstoerte werfen beim Zugriff -> aussortieren).
+        private static readonly List<(IntPtr ptr, Server server, ServerVariantSpec spec)> _watched =
+            new List<(IntPtr, Server, ServerVariantSpec)>();
+        private static DateTime _lastWatchAt = DateTime.MinValue;
+
+        private sealed class PendingInsertion
+        {
+            internal ServerVariantSpec Spec;
+            internal DateTime CreatedAt;
+        }
+
+        // ------------------------------------------------------------------ scene
+
+        internal void ResetForScene()
+        {
+            _registeredIds.Clear();
+            _variantToBaseId.Clear();
+            _shopDumped = false;
+            lock (_watched) { _watched.Clear(); }
+            _lastWatchAt = DateTime.MinValue;
+            _pendingInsertions.Clear();
+            _spawnedSpecsByUid.Clear();
+            _spawnedUidCreatedAt.Clear();
+            _pendingSpecsByPointer.Clear();
+            _repairedServerIds.Clear();
+            _sweepSummaryLogged = false;
+            _sweepRepaired = 0;
+        }
+
+        internal void BeginRepairWindow()
+        {
+            try
+            {
+                _registry.Load();
+                int count = _registry.Count;
+                if (count > 0)
+                    Log.Info($"Loaded {count} persisted server variant marker(s).");
+                _repairWindowUntil = DateTime.UtcNow.AddSeconds(ModConfig.RepairWindowSeconds);
+                _lastSweepAt = DateTime.MinValue;
+            }
+            catch (Exception ex)
+            {
+                Log.Error("BeginRepairWindow failed.", ex);
+            }
+        }
+
+        internal bool InRepairWindow => DateTime.UtcNow < _repairWindowUntil;
+
+        // ------------------------------------------------------- overlay status
+
+        internal int RegisteredCount => _registeredIds.Count;
+        internal int RepairedCount => _sweepRepaired;
+        internal string LastVerifySummary { get; private set; } = "Verify: noch nicht gelaufen.";
+        internal int LastVerifyOk { get; private set; }
+        internal int LastVerifyMismatch { get; private set; }
+        internal int LastVerifyUnknown { get; private set; }
+        internal int RegistryCount
+        {
+            get
+            {
+                try { return _registry.Count; }
+                catch { return -1; }
+            }
+        }
+
+        /// <summary>
+        /// Called after overlay visual toggles: drops the applied-visual cache and
+        /// reopens the repair sweep so tint/scale changes take effect within seconds
+        /// (scale-off restores live; tint-off applies going forward / after reload).
+        /// </summary>
+        internal void RefreshVisualsAfterToggle(string whatChanged)
+        {
+            try
+            {
+                ServerVisuals.InvalidateAll();
+                BeginRepairWindow();
+                Log.Info($"Visuals refresh after {whatChanged}: re-applying within the repair window.");
+            }
+            catch (Exception ex)
+            {
+                Log.Error("Visuals refresh failed.", ex);
+            }
+        }
+
+        /// <summary>Called from OnUpdate; cheap timestamp check, scans only inside the window, once per second.</summary>
+        internal void Tick()
+        {
+            try
+            {
+                // Watchlist laeuft IMMER (alle 5 s, intern gedrosselt): So wird
+                // sichtbar wenn das Spiel Werte zuruecksetzt - und sofort
+                // repariert, egal in welchem Fenster wir sind.
+                try { TickWatchlist(); } catch (Exception ex) { Log.Warning("Watchlist-Tick: " + ex.Message); }
+                // Pending-Kaeufe halten den Sweep am Leben (auch ausserhalb des
+                // Fensters): frisch gekaufte Varianten konvergieren so immer,
+                // selbst wenn das Insert-Event verpasst wurde.
+                bool hasPending = _pendingInsertions.Count > 0 || _spawnedSpecsByUid.Count > 0;
+                if (!InRepairWindow && !hasPending)
+                {
+                    if (!_sweepSummaryLogged)
+                    {
+                        _sweepSummaryLogged = true;
+                        if (_sweepRepaired > 0)
+                            Log.Info($"Repair window closed, {_sweepRepaired} persisted server(s) restored.");
+                    }
+                    return;
+                }
+                if (DateTime.UtcNow - _lastSweepAt < TimeSpan.FromSeconds(1.0)) return;
+                _lastSweepAt = DateTime.UtcNow;
+                SweepAllServers();
+                DrainSpawnedSpecs();
+            }
+            catch (Exception ex)
+            {
+                Log.Error("Repair tick failed.", ex);
+            }
+        }
+
+        private void SweepAllServers()
+        {
+            Server[] servers;
+            try
+            {
+                servers = UnityEngine.Object.FindObjectsOfType<Server>();
+            }
+            catch (Exception ex)
+            {
+                if (ModConfig.VerboseLogging) Log.Warning("Server sweep lookup failed: " + ex.Message);
+                return;
+            }
+            if (servers == null) return;
+            foreach (var server in servers)
+            {
+                if (server == null) continue;
+                TryRepairServer("sweep", server, onlyIfKnown: true);
+            }
+        }
+
+        // ------------------------------------------------------- shop registration
+
+        /// <summary>
+        /// Schreibt Varianten-Texte auf ALLE Shopkarten (nach Vanilla-Refresh).
+        /// Das Spiel rendert Namen per eigenem ID-Lookup darueber - daher nach
+        /// jedem Oeffnen erneut setzen, nicht nur beim Klonen.
+        /// </summary>
+        internal void RefreshVariantCardTexts(string source, ComputerShop shop)
+        {
+            try
+            {
+                if (shop?.shopItems == null) return;
+                int fixed_ = 0;
+                foreach (var item in shop.shopItems)
+                {
+                    if (item == null) continue;
+                    int id = 0;
+                    try { id = item.shopItemSO != null ? item.shopItemSO.itemID : 0; } catch { continue; }
+                    var spec = ServerVariantSpec.FindByVariantItemId(id);
+                    if (spec == null) continue;
+                    string label = $"{spec.VariantDisplayName} ({spec.RecommendedCable})";
+                    try { item.itemDisplayName = label; } catch { }
+                    try { if (item.txtName != null) item.txtName.text = label; } catch { }
+                    try { if (item.txtPrice != null) item.txtPrice.text = $"{spec.Price} $"; } catch { }
+                    try { if (item.txtXpToUnlock != null) item.txtXpToUnlock.text = $"Unlock for: {spec.XpToUnlock} xp"; } catch { }
+                    fixed_++;
+                }
+                if (fixed_ > 0)
+                    Log.Info($"Kartentexte erneuert ({source}): {fixed_} Variante(n).");
+            }
+            catch (Exception ex)
+            {
+                Log.Warning("Kartentext-Refresh fehlgeschlagen: " + ex.Message);
+            }
+        }
+
+        /// <summary>
+        /// Diagnostik: loggt Live-Werte aller Shopkarten (Anzeige-/SO-/Preis-Name),
+        /// um zu sehen was das Spiel wirklich rendert.
+        /// </summary>
+        private static void DumpShopItems(string source, ComputerShop shop)
+        {
+            try
+            {
+                var items = shop.shopItems;
+                if (items == null) return;
+                int n = 0;
+                try { n = items.Length; } catch { return; }
+                Log.Info($"Shop-Dump ({source}): {n} Eintraege.");
+                int shown = 0;
+                for (int i = 0; i < n && shown < 64; i++)
+                {
+                    ShopItem si = null;
+                    try { si = items[i]; } catch { continue; }
+                    if (si == null) continue;
+                    string disp = "", soName = "", txt = "";
+                    int price = -1, xp = -1;
+                    try { disp = si.itemDisplayName ?? ""; } catch { }
+                    try { soName = si.shopItemSO != null ? si.shopItemSO.itemName ?? "" : ""; } catch { }
+                    try { price = si.shopItemSO != null ? si.shopItemSO.price : -1; } catch { }
+                    try { xp = si.shopItemSO != null ? si.shopItemSO.xpToUnlock : -1; } catch { }
+                    try { txt = si.txtName != null ? si.txtName.text ?? "" : "(kein txtName)"; } catch { txt = "(txtName-Fehler)"; }
+                    Log.Info($"  Karte {i}: disp='{disp}' | SO='{soName}' | txt='{txt}' | {price}$ / {xp}xp");
+                    shown++;
+                }
+            }
+            catch (Exception ex)
+            {
+                Log.Warning("Shop-Dump fehlgeschlagen: " + ex.Message);
+            }
+        }
+
+        internal void TryRegisterAll(string source, ComputerShop shop)
+        {
+            try
+            {
+                if (shop == null || shop.shopItems == null) return;
+                // Dump nur bei echtem Shop-Oeffnen (Scene-Load ist zu frueh:
+                // Karten noch unbefuellt). Einmal pro Szene.
+                bool isShopOpen = source.IndexOf("Shop", StringComparison.OrdinalIgnoreCase) >= 0
+                    || source.IndexOf("Interact", StringComparison.OrdinalIgnoreCase) >= 0;
+                if (isShopOpen && !_shopDumped)
+                {
+                    _shopDumped = true;
+                    DumpShopItems(source, shop);
+                }
+                if (_registeredIds.Count >= ServerVariantSpec.All.Length) return;
+
+                int added = 0;
+                foreach (var spec in ServerVariantSpec.All)
+                {
+                    if (_registeredIds.Contains(spec.VariantId)) continue;
+                    if (ShopContainsVariant(shop, spec))
+                    {
+                        _registeredIds.Add(spec.VariantId);
+                        continue;
+                    }
+                    // Eigene IDs duerfen nie mit Vanilla kollidieren.
+                    if (VanillaUsesItemId(shop, spec.VariantItemId))
+                    {
+                        Log.Error($"Varianten-ID {spec.VariantItemId} ({spec.VariantDisplayName}) kollidiert " +
+                            "mit Vanilla - Variante uebersprungen.");
+                        continue;
+                    }
+                    var baseItem = FindBaseShopItem(shop, spec);
+                    if (baseItem == null) continue;
+                    int baseId = 0;
+                    try { baseId = baseItem.shopItemSO != null ? baseItem.shopItemSO.itemID : 0; } catch { }
+                    var clone = CloneShopItemForVariant(shop, baseItem, spec);
+                    if (clone != null && AppendShopItem(shop, clone))
+                    {
+                        _registeredIds.Add(spec.VariantId);
+                        _variantToBaseId[spec.VariantItemId] = baseId;
+                        added++;
+                        Log.Info($"Registered shop item {spec.VariantDisplayName}.");
+                    }
+                }
+                if (added > 0)
+                    Log.Info($"Shop registration from {source}: +{added} variant(s), {_registeredIds.Count}/{ServerVariantSpec.All.Length} ready.");
+                // Immer: Vanilla ueberschreibt Kartentexte per ID-Lookup beim
+                // Oeffnen - unsere Texte danach erneut setzen.
+                RefreshVariantCardTexts(source, shop);
+            }
+            catch (Exception ex)
+            {
+                Log.Error("Shop registration failed.", ex);
+            }
+        }
+
+        private static bool VanillaUsesItemId(ComputerShop shop, int itemId)
+        {
+            try
+            {
+                var items = shop.shopItems;
+                if (items == null) return false;
+                foreach (var item in items)
+                {
+                    if (item == null || item.shopItemSO == null) continue;
+                    int id = 0;
+                    try { id = item.shopItemSO.itemID; } catch { continue; }
+                    if (id == itemId) return true;
+                }
+            }
+            catch { }
+            return false;
+        }
+
+        /// <summary>Loest eine Varianten-ItemID auf die Base-ID auf (Prefab-Routing).</summary>
+        internal bool TryGetBaseId(int variantItemId, out int baseItemId)
+        {
+            try
+            {
+                if (_variantToBaseId.TryGetValue(variantItemId, out baseItemId) && baseItemId != 0)
+                    return true;
+            }
+            catch { }
+            baseItemId = 0;
+            return false;
+        }
+
+        private static bool ShopContainsVariant(ComputerShop shop, ServerVariantSpec spec)
+        {
+            foreach (var item in shop.shopItems)
+            {
+                if (item == null) continue;
+                string hay = (item.itemDisplayName ?? "") + " " + (item.guid ?? "") + " " + (item.shopItemSO?.itemName ?? "");
+                if (hay.IndexOf(spec.VariantId, StringComparison.OrdinalIgnoreCase) >= 0 ||
+                    hay.IndexOf(spec.VariantDisplayName, StringComparison.OrdinalIgnoreCase) >= 0)
+                    return true;
+            }
+            return false;
+        }
+
+        private static ShopItem FindBaseShopItem(ComputerShop shop, ServerVariantSpec spec)
+        {
+            foreach (var item in shop.shopItems)
+            {
+                if (item == null || item.shopItemSO == null) continue;
+                string assetName = item.shopItemSO.name ?? "";
+                string display = item.itemDisplayName ?? "";
+                if (assetName.IndexOf(spec.BaseAssetName, StringComparison.OrdinalIgnoreCase) >= 0 ||
+                    display.IndexOf(spec.BaseDisplayName, StringComparison.OrdinalIgnoreCase) >= 0 ||
+                    display.IndexOf(spec.BaseDisplayName.Replace("IOPs", "IOPS", StringComparison.Ordinal), StringComparison.OrdinalIgnoreCase) >= 0)
+                    return item;
+            }
+            return null;
+        }
+
+        private static ShopItem CloneShopItemForVariant(ComputerShop shop, ShopItem baseItem, ServerVariantSpec spec)
+        {
+            try
+            {
+                string cardLabel = $"{spec.VariantDisplayName} ({spec.RecommendedCable})";
+                var parent = baseItem.transform != null ? baseItem.transform.parent : null;
+                GameObject cloneGo = parent != null
+                    ? UnityEngine.Object.Instantiate(baseItem.gameObject, parent, false)
+                    : UnityEngine.Object.Instantiate(baseItem.gameObject);
+                if (cloneGo == null) return null;
+
+                var clone = cloneGo.GetComponent<ShopItem>();
+                if (clone == null)
+                {
+                    UnityEngine.Object.Destroy(cloneGo);
+                    return null;
+                }
+
+                var newSo = ScriptableObject.CreateInstance<ShopItemSO>();
+                newSo.itemName = cardLabel;
+                newSo.price = spec.Price;
+                newSo.xpToUnlock = spec.XpToUnlock;
+                newSo.itemType = baseItem.shopItemSO.itemType;
+                // Eigene Item-ID: Boosted Server sind eigenstaendige Eintraege
+                // (keine Base-Kopie mehr). Prefab-Routing via GetPrefabForItem-Prefix.
+                newSo.itemID = spec.VariantItemId;
+                newSo.eol = baseItem.shopItemSO.eol;
+                newSo.isCustomColor = false;
+                newSo.sprite = baseItem.shopItemSO.sprite;
+
+                cloneGo.name = spec.VariantId + "_button";
+                clone.shopItemSO = newSo;
+                clone.guid = spec.VariantId;
+                clone.itemDisplayName = cardLabel;
+
+                if (clone.txtName != null) clone.txtName.text = cardLabel;
+                if (clone.txtPrice != null) clone.txtPrice.text = $"{spec.Price} $";
+                if (clone.txtXpToUnlock != null) clone.txtXpToUnlock.text = $"Unlock for: {spec.XpToUnlock} xp";
+                if (clone.itemIcon != null && newSo.sprite != null) clone.itemIcon.sprite = newSo.sprite;
+
+                try { clone.OnLoad(); } catch { /* visual state best-effort */ }
+                try { clone.UpdateVisualState(); } catch { /* visual state best-effort */ }
+
+                // UpdateVisualState() resets the name to "Unknown" for locked
+                // items (xpToUnlock > 0). Re-assert the real name so the player
+                // can see what they are unlocking.
+                if (clone.txtName != null) clone.txtName.text = cardLabel;
+                clone.itemDisplayName = cardLabel;
+
+                cloneGo.SetActive(true);
+                return clone;
+            }
+            catch (Exception ex)
+            {
+                Log.Error($"Cloning shop item for {spec.VariantDisplayName} failed.", ex);
+                return null;
+            }
+        }
+
+        private static bool AppendShopItem(ComputerShop shop, ShopItem clone)
+        {
+            try
+            {
+                var old = shop.shopItems;
+                if (old == null) return false;
+                var grown = new Il2CppReferenceArray<ShopItem>(old.Length + 1);
+                for (int i = 0; i < old.Length; i++) grown[i] = old[i];
+                grown[old.Length] = clone;
+                shop.shopItems = grown;
+                return true;
+            }
+            catch (Exception ex)
+            {
+                Log.Warning($"Could not extend ComputerShop.shopItems, clone UI still parented: {ex.Message}");
+                return false;
+            }
+        }
+
+        // ------------------------------------------------------------- purchases
+
+        internal void TrackPurchase(string source, int itemId, int price, PlayerManager.ObjectInHand itemType, string displayName)
+        {
+            try
+            {
+                if (!IsServerItemType(itemType)) return;
+                // Strict Name -> Varianten-ID. KEIN Preis-Fallback: 8 Varianten
+                // teilen sich 2 Preis-Punkte (20000/100000), Preis allein ist
+                // nicht eindeutig und hat in v1.x Phantom-/Fehl-Konfigurationen
+                // verursacht (BUGFIX_NOTES #7). Ohne Match wird NICHT getrackt —
+                // ein erratener Spec laeuft Gefahr, den falschen Server zu
+                // konfigurieren (ISSUE-005/008).
+                var spec = ServerVariantSpec.FindByShopValues(displayName, price);
+                string how = "Name-Match";
+                if (spec == null)
+                {
+                    // Exakte Varianten-ItemID (9001-9008) ist eindeutig.
+                    spec = FindSpecByVariantId(itemId);
+                    how = "ID-Match";
+                }
+                if (spec == null)
+                {
+                    Log.Warning($"Purchase without variant match (id={itemId} price={price} name='{displayName}'): not tracked.");
+                    return;
+                }
+                EnqueuePending(spec);
+                Log.Info($"Tracked purchase for {spec.VariantDisplayName} from {source} ({how}).");
+            }
+            catch (Exception ex)
+            {
+                Log.Error("Purchase tracking failed.", ex);
+            }
+        }
+
+        /// <summary>Exakter Match ueber Varianten-ItemID (9001-9008).</summary>
+        private static ServerVariantSpec FindSpecByVariantId(int itemId)
+        {
+            try
+            {
+                foreach (var spec in ServerVariantSpec.All)
+                {
+                    if (spec.VariantItemId == itemId) return spec;
+                }
+            }
+            catch { }
+            return null;
+        }
+
+        internal void RewritePurchaseDisplayName(int itemId, int price, PlayerManager.ObjectInHand itemType, ref string displayName)
+        {
+            try
+            {
+                if (!IsServerItemType(itemType) || string.IsNullOrEmpty(displayName)) return;
+                var spec = ServerVariantSpec.FindByShopValues(displayName, price);
+                if (spec == null) return;
+                string canonical = $"{spec.VariantDisplayName} ({spec.RecommendedCable})";
+                if (!string.Equals(displayName, canonical, StringComparison.Ordinal))
+                {
+                    displayName = canonical;
+                    if (ModConfig.VerboseLogging)
+                        Log.Info($"Rewrote cart display name to '{canonical}'.");
+                }
+            }
+            catch (Exception ex)
+            {
+                Log.Error("Display-name rewrite failed.", ex);
+            }
+        }
+
+        internal void ConfigureSpawnedItem(string source, ComputerShop shop, int price, PlayerManager.ObjectInHand itemType, int uid)
+        {
+            try
+            {
+                if (!IsServerItemType(itemType)) return;
+                // Peek (kein Konsum): passender Pending-Eintrag fuer den Spawn.
+                // Verbraucht wird erst bei erfolgreicher Insertion
+                // (FinalizeInsertedServer -> RemoveOnePendingSpec).
+                var spec = PeekPendingSpecForSpawn(price);
+                if (spec == null) return;
+                Log.Info($"Spawn ({source}): {spec.VariantDisplayName} uid={uid} - suche physisches Item.");
+                _spawnedSpecsByUid[uid] = spec;
+                RememberSpawnedUid(uid);
+
+                GameObject go = null;
+                try { if (shop?.spawnedItems != null) shop.spawnedItems.TryGetValue(uid, out go); } catch { /* best-effort */ }
+                if (go == null)
+                {
+                    Log.Info($"Spawn uid {uid} fuer {spec.VariantDisplayName} noch nicht in spawnedItems; Drain/Insert uebernehmen.");
+                    return;
+                }
+                int configured = 0;
+                foreach (var server in go.GetComponentsInChildren<Server>(true))
+                {
+                    if (server == null) continue;
+                    _pendingSpecsByPointer[server.Pointer] = spec;
+                    if (ConfigureServerAndPorts(server, spec, source, out _, out _)) configured++;
+                    LogSpawnCheck(server, spec, source + "/spawn");
+                }
+                if (ModConfig.VerboseLogging || configured > 0)
+                    Log.Info($"Configured spawned {spec.VariantDisplayName} uid {uid}: {configured} server(s).");
+            }
+            catch (Exception ex)
+            {
+                Log.Error("Spawned-item configuration failed.", ex);
+            }
+        }
+
+        private static readonly System.Collections.Generic.HashSet<int> _keysLoggedUids =
+            new System.Collections.Generic.HashSet<int>();
+
+        /// <summary>
+        /// Retries uid-correlated spawns that were not in spawnedItems yet.
+        /// Trailing UIDs (never surfaced, e.g. shop closed before spawn) expire
+        /// after 60 seconds so the 1/sec sweep does not run forever.
+        /// </summary>
+        /// <summary>
+        /// Sofort-Drain ohne Throttle (z.B. direkt nach Checkout): Der Spawn
+        /// ist dann garantiert registriert - kein Warten auf den 1/s-Tick.
+        /// </summary>
+        internal void DrainSpawnedSpecsNow(string source)
+        {
+            try { DrainSpawnedSpecs(); } catch { }
+        }
+
+        private void DrainSpawnedSpecs()
+        {
+            if (_spawnedSpecsByUid.Count == 0) return;
+            DateTime now = DateTime.UtcNow;
+            ComputerShop shop = null;
+            try { shop = MainGameManager.instance?.computerShop; } catch { /* best-effort */ }
+            if (shop?.spawnedItems == null)
+            {
+                PruneStaleSpawned(now);
+                return;
+            }
+
+            int[] uids = _spawnedSpecsByUid.Keys.ToArray();
+            foreach (int uid in uids)
+            {
+                GameObject go = null;
+                try { shop.spawnedItems.TryGetValue(uid, out go); } catch { continue; }
+                if (go == null)
+                {
+                    // Diagnose (einmal pro UID): welche Keys hat spawnedItems
+                    // wirklich? Klaert ob unser UID-Read (0?) daneben liegt.
+                    if (_keysLoggedUids.Add(uid))
+                    {
+                        try
+                        {
+                            var keys = shop.spawnedItems.Keys;
+                            int n = 0;
+                            try { n = keys != null ? keys.Count : -1; } catch { n = -1; }
+                            var sample = new System.Collections.Generic.List<int>();
+                            try
+                            {
+                                if (keys != null)
+                                {
+                                    foreach (int k in keys)
+                                    {
+                                        sample.Add(k);
+                                        if (sample.Count >= 8) break;
+                                    }
+                                }
+                            }
+                            catch { }
+                            Log.Info($"Spawn-Diagnose uid={uid}: spawnedItems hat {n} Eintraege " +
+                                $"(z.B. {string.Join(",", sample.ConvertAll(k => k.ToString()).ToArray())}).");
+                        }
+                        catch { }
+                    }
+                    // Noch nicht da oder schon an den Spieler uebergeben:
+                    // nach 60 s aufgeben (Insertion konfiguriert dann weiterhin).
+                    if (_spawnedUidCreatedAt.TryGetValue(uid, out DateTime created) &&
+                        now - created > TimeSpan.FromSeconds(60))
+                    {
+                        _spawnedSpecsByUid.Remove(uid);
+                        _spawnedUidCreatedAt.Remove(uid);
+                        Log.Warning($"Spawned uid {uid} never surfaced in spawnedItems; dropped after 60s (converged at insertion instead).");
+                    }
+                    continue;
+                }
+                var spec = _spawnedSpecsByUid[uid];
+                foreach (var server in go.GetComponentsInChildren<Server>(true))
+                {
+                    if (server == null) continue;
+                    _pendingSpecsByPointer[server.Pointer] = spec;
+                    ConfigureServerAndPorts(server, spec, "spawned-drain", out _, out _);
+                    LogSpawnCheck(server, spec, "spawned-drain");
+                }
+                _spawnedSpecsByUid.Remove(uid);
+                _spawnedUidCreatedAt.Remove(uid);
+            }
+        }
+
+        /// <summary>
+        /// Expliziter Speed-Check direkt nach dem Spawn-Configure: liest
+        /// maxProcessingSpeed zurueck und meldet OK oder MISMATCH mit
+        /// Live-Wert. Unbedingt (nicht nur verbose) - ein Kauf ist selten.
+        /// </summary>
+        private static void LogSpawnCheck(Server server, ServerVariantSpec spec, string source)
+        {
+            try
+            {
+                float live = -1f;
+                try { live = server.maxProcessingSpeed; } catch { }
+                if (Approx(live, spec.RuntimeProcessingSpeed))
+                    Log.Info($"Spawn-Check {spec.VariantDisplayName} ({source}): OK speed={live:F3}.");
+                else
+                    Log.Warning($"Spawn-Check {spec.VariantDisplayName} ({source}): MISMATCH " +
+                        $"live={live:F3} erwartet={spec.RuntimeProcessingSpeed:F3}.");
+            }
+            catch (Exception ex)
+            {
+                Log.Warning($"Spawn-Check {spec?.VariantDisplayName} ({source}) fehlgeschlagen: {ex.Message}");
+            }
+        }
+
+        private static void WatchServer(Server server, ServerVariantSpec spec)
+        {
+            if (server == null || spec == null) return;
+            try
+            {
+                IntPtr ptr = IntPtr.Zero;
+                try { ptr = server.Pointer; } catch { return; }
+                if (ptr == IntPtr.Zero) return;
+                lock (_watched)
+                {
+                    foreach (var w in _watched)
+                    {
+                        if (w.ptr == ptr) return;
+                    }
+                    _watched.Add((ptr, server, spec));
+                }
+            }
+            catch { }
+        }
+
+        /// <summary>
+        /// Alle 5 s: Watchlist pruefen. Driftet ein Varianten-Server vom Spec
+        /// weg (Spiel hat ueberschrieben), sofort neu konfigurieren + melden.
+        /// Tote Referenzen aussortieren. Laeuft auch ausserhalb des Fensters.
+        /// </summary>
+        internal void TickWatchlist()
+        {
+            try
+            {
+                if (DateTime.UtcNow - _lastWatchAt < TimeSpan.FromSeconds(5.0)) return;
+                _lastWatchAt = DateTime.UtcNow;
+                List<(IntPtr ptr, Server server, ServerVariantSpec spec)> snapshot;
+                lock (_watched) { snapshot = new List<(IntPtr, Server, ServerVariantSpec)>(_watched); }
+                if (snapshot.Count == 0) return;
+                foreach (var (ptr, server, spec) in snapshot)
+                {
+                    if (server == null || spec == null) { DropWatched(ptr); continue; }
+                    float live;
+                    try { live = server.maxProcessingSpeed; }
+                    catch { DropWatched(ptr); continue; } // zerstoert
+                    if (Approx(live, spec.RuntimeProcessingSpeed)) continue;
+                    Log.Warning($"Watchlist: {spec.VariantDisplayName} gedriftet " +
+                        $"(live={live:F3} erwartet={spec.RuntimeProcessingSpeed:F3}) - konfiguriere neu.");
+                    if (!RepairGuard.TryEnter(ptr)) continue;
+                    try
+                    {
+                        ConfigureServerAndPorts(server, spec, "watchlist", out bool changed, out int ports);
+                        if (changed || ports > 0) ForceServerDisplayRefresh(server);
+                    }
+                    catch (Exception ex)
+                    {
+                        Log.Warning($"Watchlist Re-Configure fehlgeschlagen: {ex.Message}");
+                    }
+                    finally
+                    {
+                        RepairGuard.Exit(ptr);
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                Log.Warning($"Watchlist-Tick fehlgeschlagen: {ex.Message}");
+            }
+        }
+
+        private static void DropWatched(IntPtr ptr)
+        {
+            if (ptr == IntPtr.Zero) return;
+            try
+            {
+                lock (_watched)
+                {
+                    for (int i = _watched.Count - 1; i >= 0; i--)
+                    {
+                        if (_watched[i].ptr == ptr) _watched.RemoveAt(i);
+                    }
+                }
+            }
+            catch { }
+        }
+        private void PruneStaleSpawned(DateTime now)
+        {
+            foreach (var kv in _spawnedUidCreatedAt.ToArray())
+            {
+                if (now - kv.Value > TimeSpan.FromSeconds(60) &&
+                    _spawnedSpecsByUid.ContainsKey(kv.Key))
+                {
+                    _spawnedSpecsByUid.Remove(kv.Key);
+                    _spawnedUidCreatedAt.Remove(kv.Key);
+                    Log.Warning($"Dropped stale spawned-uid {kv.Key} after 60s without shop.");
+                }
+            }
+        }
+
+        // ------------------------------------------------------------- insertion
+
+        internal void FinalizeInsertedServer(string source, Server server, ServerSaveData saveData)
+        {
+            if (server == null) return;
+            IntPtr ptr = IntPtr.Zero;
+            try { ptr = server.Pointer; } catch { /* best-effort */ }
+            if (!RepairGuard.TryEnter(ptr)) return;
+            try
+            {
+                float liveSpeed = -1f;
+                string liveName = "";
+                try { liveSpeed = server.maxProcessingSpeed; } catch { }
+                try { liveName = server.gameObject != null ? server.gameObject.name ?? "" : ""; } catch { }
+                // Save-Load-Burst nicht spammen: nur manuelle Inserts laut loggen.
+                if (saveData == null)
+                    Log.Info($"Insert ({source}): '{liveName}' ptr=0x{ptr.ToInt64():X} liveSpeed={liveSpeed:F3} saveData=null.");
+                else if (ModConfig.VerboseLogging)
+                    Log.Info($"Insert ({source}): '{liveName}' liveSpeed={liveSpeed:F3} saveData=ok.");
+                var spec = ResolveSpecForInsertedServer(server, consumePending: saveData == null);
+                if (spec == null)
+                {
+                    // Save-Load-Rauschen unterdruecken: Hunderte Vanilla-Server
+                    // beim Laden sind kein Fehler. Nur manuelle Inserts laut melden.
+                    if (saveData == null)
+                        Log.Info($"Insert ({source}): keine Spec aufgeloest (liveSpeed={liveSpeed:F3}) - bleibt Vanilla.");
+                    else if (ModConfig.VerboseLogging && _pendingInsertions.Count > 0)
+                        Log.Info($"Insertion from {source} has {_pendingInsertions.Count} pending purchase(s) but no match (id='{ReadServerId(server) ?? ""}').");
+                    return;
+                }
+                if (!SpeedPlausibleForSpec(liveSpeed, spec))
+                {
+                    Log.Warning($"Resolved {spec.VariantDisplayName} for inserted server, " +
+                        $"but liveSpeed={liveSpeed:F3} passt weder zu Base ({spec.BaseRuntimeProcessingSpeed:F3}) " +
+                        $"noch Variante ({spec.RuntimeProcessingSpeed:F3}). Skipping.");
+                    return;
+                }
+                ConfigureServerAndPorts(server, spec, source, out bool serverChanged, out int changedPorts);
+                ForceServerDisplayRefresh(server);
+                string id = ReadServerId(server);
+                if (!string.IsNullOrEmpty(id)) _registry.Set(id, spec);
+                _pendingSpecsByPointer.Remove(ptr);
+                // KEIN RemoveOnePendingSpec hier: ein Kauf wird genau einmal
+                // konsumiert - an der Spawn-Stelle (ConsumePendingSpecForSpawn)
+                // bzw. in DequeueMatchingPendingSpec. Ein zweiter Konsum hier
+                // wuerde einen Folge-Kauf desselben Preispunkts (20000/100000)
+                // fehl-verbrauchen und zu Fehl-Zuordnung fuehren.
+                Log.Info($"Finalized {spec.VariantDisplayName} from {source}: serverChanged={serverChanged}, changedPorts={changedPorts}.");
+            }
+            catch (Exception ex)
+            {
+                Log.Error("Inserted-server finalization failed.", ex);
+            }
+            finally
+            {
+                RepairGuard.Exit(ptr);
+            }
+        }
+
+        // ---------------------------------------------------------------- repair
+
+        internal void TryRepairServer(string source, Server server, bool onlyIfKnown)
+        {
+            if (server == null) return;
+            IntPtr ptr = IntPtr.Zero;
+            try { ptr = server.Pointer; } catch { return; }
+            if (!RepairGuard.TryEnter(ptr)) return; // re-entrant (nested patch) — bail out, fixes stack overflow
+            try
+            {
+                string id = ReadServerId(server);
+                ServerVariantSpec spec = null;
+                if (!string.IsNullOrEmpty(id))
+                {
+                    if (_repairedServerIds.Contains(id)) return;
+                    spec = _registry.Get(id);
+                }
+                if (spec == null)
+                    spec = InferSpecFromRuntime(server);
+                if (spec == null)
+                {
+                    if (!onlyIfKnown && ModConfig.VerboseLogging)
+                        Log.Info($"No variant for server id='{id ?? ""}' from {source}.");
+                    return;
+                }
+                float repairSpeed = -1f;
+                try { repairSpeed = server.maxProcessingSpeed; } catch { }
+                if (!SpeedPlausibleForSpec(repairSpeed, spec))
+                {
+                    if (!string.IsNullOrEmpty(id)) _repairedServerIds.Add(id);
+                    Log.Warning($"Skipped persisted marker for {spec.VariantDisplayName}: " +
+                        $"liveSpeed={repairSpeed:F3} passt weder zu Base noch Variante (id='{id}').");
+                    return;
+                }
+                ConfigureServerAndPorts(server, spec, source, out bool serverChanged, out int changedPorts);
+                if (serverChanged || changedPorts > 0)
+                    ForceServerDisplayRefresh(server);
+                if (!string.IsNullOrEmpty(id))
+                {
+                    _repairedServerIds.Add(id);
+                    _registry.Set(id, spec); // normalize legacy ids
+                }
+                if (serverChanged || changedPorts > 0)
+                {
+                    _sweepRepaired++;
+                    Log.Info($"Repaired {spec.VariantDisplayName} from {source}: serverChanged={serverChanged}, changedPorts={changedPorts}.");
+                }
+            }
+            catch (Exception ex)
+            {
+                Log.Error("Persisted-server repair failed.", ex);
+            }
+            finally
+            {
+                RepairGuard.Exit(ptr);
+            }
+        }
+
+        internal void RepairAfterDeviceRepair(string source, Server server)
+        {
+            // Technician replacements respawn/reset servers; re-assert the variant.
+            TryRepairServer(source, server, onlyIfKnown: false);
+            if (server == null) return;
+            var spec = ResolveSpecForServer(server);
+            if (spec == null) return;
+            IntPtr ptr = IntPtr.Zero;
+            try { ptr = server.Pointer; } catch { /* best-effort */ }
+            if (!RepairGuard.TryEnter(ptr)) return;
+            try
+            {
+                ConfigureServerAndPorts(server, spec, source, out _, out _);
+                ForceServerDisplayRefresh(server);
+                string id = ReadServerId(server);
+                if (!string.IsNullOrEmpty(id)) _registry.Set(id, spec);
+                Log.Info($"Re-applied {spec.VariantDisplayName} after device repair.");
+            }
+            catch (Exception ex)
+            {
+                Log.Error("Post-repair re-application failed.", ex);
+            }
+            finally
+            {
+                RepairGuard.Exit(ptr);
+            }
+        }
+
+        // ------------------------------------------------------- configure core
+
+        /// <summary>
+        /// Applies IOPS + port profile. NEVER touches connected ports
+        /// (cableIDsOnLink != 0 or insertedSFP set) and never removes an
+        /// inserted SFP module — this is what broke ports (0G / no reconnect)
+        /// after reload in v1.x.
+        /// </summary>
+        internal static bool ConfigureServerAndPorts(Server server, ServerVariantSpec spec, string source,
+            out bool serverChanged, out int changedPorts)
+        {
+            serverChanged = false;
+            changedPorts = 0;
+            try
+            {
+                float target = spec.RuntimeProcessingSpeed;
+                if (!Approx(server.maxProcessingSpeed, target))
+                {
+                    server.maxProcessingSpeed = target;
+                    serverChanged = true;
+                }
+                // Clamp, never zero: v1.x wrote 0 when out of range, stalling output.
+                if (server.currentProcessingSpeed > target)
+                {
+                    server.currentProcessingSpeed = target;
+                    serverChanged = true;
+                }
+
+                var links = CollectServerLinks(server);
+                foreach (var link in links)
+                {
+                    if (ConfigurePort(link, spec, server))
+                        changedPorts++;
+                }
+
+                // Visual differentiation (tint + scale). Idempotent and cheap after
+                // the first pass; runs on every configure path (spawn/insert/repair).
+                ServerVisuals.Apply(server, spec);
+
+                // Read-Back-Verifikation: Beweist ob die Werte wirklich haften
+                // (oder ob das Spiel sie danach zuruecksetzt). Mismatch -> Warnung.
+                VerifyApplied(server, spec, source);
+
+                // Watchlist: Speed bleibt ueberwacht, Re-Assert bei Drift.
+                WatchServer(server, spec);
+
+                if ((serverChanged || changedPorts > 0) && ModConfig.VerboseLogging)
+                    Log.Info($"Configured {spec.VariantDisplayName} from {source}: serverChanged={serverChanged}, changedPorts={changedPorts}.");
+                return serverChanged || changedPorts > 0;
+            }
+            catch (Exception ex)
+            {
+                Log.Error("ConfigureServerAndPorts failed.", ex);
+                return false;
+            }
+        }
+
+        private static List<CableLink> CollectServerLinks(Server server)
+        {
+            var result = new List<CableLink>();
+            var seen = new HashSet<IntPtr>();
+            void Add(CableLink link)
+            {
+                if (link == null) return;
+                IntPtr p = IntPtr.Zero;
+                try { p = link.Pointer; } catch { return; }
+                if (p != IntPtr.Zero && seen.Add(p) && IsServerLinkFor(link, server))
+                    result.Add(link);
+            }
+            try
+            {
+                if (server.cablelinks != null)
+                    foreach (var link in server.cablelinks) Add(link);
+            }
+            catch { /* best-effort */ }
+            try
+            {
+                if (server.activeLinks != null)
+                    foreach (var link in server.activeLinks) Add(link);
+            }
+            catch { /* best-effort */ }
+            try
+            {
+                foreach (var link in server.GetComponentsInChildren<CableLink>(true)) Add(link);
+            }
+            catch { /* best-effort */ }
+            return result;
+        }
+
+        private static bool IsServerLinkFor(CableLink link, Server server)
+        {
+            try
+            {
+                if (link.typeOfLink != CableLink.TypeOfLink.Server) return false;
+                if (link.parentSwitch != null || link.parentPatchPanel != null) return false;
+                if (link.parentServer == null) return true; // unassigned server-side port
+                IntPtr a = IntPtr.Zero, b = IntPtr.Zero;
+                try { a = link.parentServer.Pointer; } catch { return false; }
+                try { b = server.Pointer; } catch { return false; }
+                return a == b;
+            }
+            catch { return false; }
+        }
+
+        private static bool ConfigurePort(CableLink link, ServerVariantSpec spec, Server server)
+        {
+            try
+            {
+                // Port in use (cable id assigned or SFP module inserted): hands off.
+                bool hasCable = false;
+                try { hasCable = link.cableIDsOnLink != 0; } catch { /* best-effort */ }
+                bool hasModule = false;
+                try { hasModule = link.insertedSFP != null; } catch { /* best-effort */ }
+                if (hasCable || hasModule) return false;
+
+                bool changed = false;
+                float targetSpeed = spec.RuntimeNetworkSpeed;
+                if (!Approx(link.connectionSpeed, targetSpeed))
+                {
+                    try { link.SetConnectionSpeed(targetSpeed); } catch { /* setter best-effort */ }
+                    if (!Approx(link.connectionSpeed, targetSpeed))
+                    {
+                        try { link.connectionSpeed = targetSpeed; } catch { /* best-effort */ }
+                    }
+                    changed = true;
+                }
+                try { if (!link.isSFPPort) { link.isSFPPort = true; changed = true; } } catch { /* best-effort */ }
+                try { if (!link.isFibrePort) { link.isFibrePort = true; changed = true; } } catch { /* best-effort */ }
+                try { if (link.sfpTypeSupported != spec.SfpType) { link.sfpTypeSupported = spec.SfpType; changed = true; } } catch { /* best-effort */ }
+                try { if (link.sfpTypeInserted != spec.SfpType) { link.sfpTypeInserted = spec.SfpType; changed = true; } } catch { /* best-effort */ }
+                // Only clear the module slot when it is already empty; never yank hardware.
+                // (Direct-fiber profile: no module required.)
+                try
+                {
+                    if (link.parentServer == null)
+                    {
+                        link.parentServer = server;
+                        changed = true;
+                    }
+                }
+                catch { /* best-effort */ }
+                return changed;
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
+        private static void ForceServerDisplayRefresh(Server server)
+        {
+            try
+            {
+                server.lastDisplayedMaxSpeed = -1f;
+                server.lastDisplayedProcessingSpeed = -1f;
+                server.lastDisplayedEolMinute = -1;
+                server.lastDisplayedLabel = string.Empty;
+            }
+            catch { /* best-effort */ }
+        }
+
+        /// <summary>
+        /// Liest die eben geschriebenen Werte zurueck. Mismatch heisst: Das Spiel
+        /// (oder ein anderer Mod) hat sie danach ueberschrieben - dann ist
+        /// Configure der falsche Zeitpunkt/das falsche Feld.
+        /// </summary>
+        private static void VerifyApplied(Server server, ServerVariantSpec spec, string source)
+        {
+            try
+            {
+                float live;
+                try { live = server.maxProcessingSpeed; }
+                catch (Exception ex)
+                {
+                    Log.Warning($"Verify {spec.VariantDisplayName} ({source}): maxProcessingSpeed nicht lesbar: {ex.Message}");
+                    return;
+                }
+                if (!Approx(live, spec.RuntimeProcessingSpeed))
+                {
+                    Log.Warning($"Verify {spec.VariantDisplayName} ({source}): MISMATCH maxProcessingSpeed " +
+                        $"live={live:F3} erwartet={spec.RuntimeProcessingSpeed:F3}.");
+                    return;
+                }
+                int checkedPorts = 0, badPorts = 0;
+                foreach (var link in CollectServerLinks(server))
+                {
+                    bool busy = false;
+                    try { busy = link.cableIDsOnLink != 0 || link.insertedSFP != null; } catch { continue; }
+                    if (busy) continue;
+                    checkedPorts++;
+                    float ls;
+                    try { ls = link.connectionSpeed; } catch { continue; }
+                    if (!Approx(ls, spec.RuntimeNetworkSpeed)) badPorts++;
+                }
+                Log.Info($"Verify {spec.VariantDisplayName} ({source}): OK " +
+                    $"max={live:F3}, Ports geprueft={checkedPorts}, abweichend={badPorts}.");
+            }
+            catch (Exception ex)
+            {
+                Log.Warning($"Verify {spec.VariantDisplayName} ({source}) fehlgeschlagen: {ex.Message}");
+            }
+        }
+
+        /// <summary>
+        /// Read-only Audit ueber alle Server: Welche Varianten-Marker sind live
+        /// korrekt konfiguriert, welche weichen ab, welche sind unbekannt?
+        /// Schreibt nichts - reiner Befund fuer Panel + Log.
+        /// </summary>
+        internal void VerifyAllServers(string source)
+        {
+            int ok = 0, mismatch = 0, unknown = 0;
+            var mismatchNames = new List<string>();
+            try
+            {
+                Server[] servers;
+                try { servers = UnityEngine.Object.FindObjectsOfType<Server>(); }
+                catch (Exception ex)
+                {
+                    LastVerifySummary = "Verify: Server-Suche fehlgeschlagen.";
+                    Log.Warning("Verify: Server-Suche fehlgeschlagen: " + ex.Message);
+                    return;
+                }
+                if (servers == null) return;
+                foreach (var server in servers)
+                {
+                    if (server == null) continue;
+                    ServerVariantSpec spec = null;
+                    try { spec = ResolveSpecForServer(server) ?? InferSpecFromRuntime(server); }
+                    catch { spec = null; }
+                    if (spec == null) { unknown++; continue; }
+                    bool good = true;
+                    try
+                    {
+                        if (!Approx(server.maxProcessingSpeed, spec.RuntimeProcessingSpeed)) good = false;
+                    }
+                    catch { good = false; }
+                    if (good) ok++;
+                    else
+                    {
+                        mismatch++;
+                        if (mismatchNames.Count < 5)
+                        {
+                            string n = "";
+                            try { n = server.gameObject != null ? server.gameObject.name ?? "" : ""; } catch { }
+                            mismatchNames.Add($"{spec.VariantDisplayName} @{n}");
+                        }
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                Log.Error("VerifyAllServers failed.", ex);
+                return;
+            }
+            LastVerifyOk = ok;
+            LastVerifyMismatch = mismatch;
+            LastVerifyUnknown = unknown;
+            LastVerifySummary = $"Verify ({source}): OK={ok} Mismatch={mismatch} Unbekannt={unknown}" +
+                (mismatchNames.Count > 0 ? " | z.B. " + string.Join(", ", mismatchNames.ToArray()) : "");
+            Log.Info(LastVerifySummary);
+        }
+
+        // ------------------------------------------------------------- resolving
+
+        private ServerVariantSpec ResolveSpecForInsertedServer(Server server, bool consumePending)
+        {
+            IntPtr ptr = IntPtr.Zero;
+            try { ptr = server.Pointer; } catch { /* best-effort */ }
+            if (ptr != IntPtr.Zero && _pendingSpecsByPointer.TryGetValue(ptr, out var byPointer))
+                return byPointer;
+
+            var byRegistry = ResolveSpecForServer(server);
+            if (byRegistry != null) return byRegistry;
+
+            var inferred = InferSpecFromRuntime(server);
+            if (inferred != null) return inferred;
+
+            // Speed-Tier-Inferenz (namen-unabhaengig): Server laeuft bereits
+            // auf Varianten-Speed (z.B. Spawn-configure, Rename durch Dritte).
+            // Familie ggf. unscharf (Tint) - Werte pro Tier sind identisch.
+            var byTier = InferSpecBySpeedTier(server);
+            if (byTier != null) return byTier;
+
+            if (consumePending) return DequeueMatchingPendingSpec(server);
+            return null;
+        }
+
+        private ServerVariantSpec ResolveSpecForServer(Server server)
+        {
+            string id = ReadServerId(server);
+            if (string.IsNullOrEmpty(id)) return null;
+            return _registry.Get(id);
+        }
+
+        /// <summary>
+        /// Speed-Plausibilitaet ohne Namen: akzeptiert Base-Speed (frisch) und
+        /// Varianten-Speed (bereits konfiguriert). Schuetzt vor Konfiguration
+        /// voellig fremder Server, ohne auf (umbenennbare) Objektnamen zu bauen.
+        /// </summary>
+        private static bool SpeedPlausibleForSpec(float liveSpeed, ServerVariantSpec spec)
+        {
+            if (spec == null) return false;
+            return Approx(liveSpeed, spec.RuntimeProcessingSpeed)
+                || Approx(liveSpeed, spec.BaseRuntimeProcessingSpeed);
+        }
+
+        /// <summary>
+        /// Tier-Inferenz: Live-Speed entspricht einer Varianten-Stufe.
+        /// Familien-Zuordnung ggf. unscharf (erste passende Spec).
+        /// </summary>
+        private static ServerVariantSpec InferSpecBySpeedTier(Server server)
+        {
+            try
+            {
+                float speed;
+                try { speed = server.maxProcessingSpeed; } catch { return null; }
+                foreach (var spec in ServerVariantSpec.All)
+                {
+                    if (Approx(speed, spec.RuntimeProcessingSpeed)) return spec;
+                }
+                return null;
+            }
+            catch { return null; }
+        }
+
+        /// <summary>
+        /// Self-healing fallback: a server whose name matches a variant base and
+        /// whose speed already equals a variant speed was configured before
+        /// (registry lost or never written). Re-assert + re-persist it instead of
+        /// forcing the player to rebuy.
+        /// </summary>
+        private static ServerVariantSpec InferSpecFromRuntime(Server server)
+        {
+            try
+            {
+                string name = server.gameObject != null ? server.gameObject.name ?? "" : "";
+                float speed;
+                try { speed = server.maxProcessingSpeed; } catch { return null; }
+                foreach (var spec in ServerVariantSpec.All)
+                {
+                    if (!Approx(speed, spec.RuntimeProcessingSpeed)) continue;
+                    if (NameMatchesBaseToken(name, spec.BaseRuntimeToken)) return spec;
+                }
+                return null;
+            }
+            catch { return null; }
+        }
+
+        private static bool LooksLikeBaseForSpec(Server server, ServerVariantSpec spec)
+        {
+            try
+            {
+                string name = server.gameObject != null ? server.gameObject.name ?? "" : "";
+                if (!NameMatchesBaseToken(name, spec.BaseRuntimeToken)) return false;
+                return Approx(server.maxProcessingSpeed, spec.BaseRuntimeProcessingSpeed);
+            }
+            catch { return false; }
+        }
+
+        private static bool LooksLikeVariantForSpec(Server server, ServerVariantSpec spec)
+        {
+            try
+            {
+                string name = server.gameObject != null ? server.gameObject.name ?? "" : "";
+                if (!NameMatchesBaseToken(name, spec.BaseRuntimeToken)) return false;
+                return Approx(server.maxProcessingSpeed, spec.RuntimeProcessingSpeed);
+            }
+            catch { return false; }
+        }
+
+        private static bool NameMatchesBaseToken(string name, string token)
+        {
+            if (string.IsNullOrEmpty(name) || string.IsNullOrEmpty(token)) return false;
+            string n = name.Replace('_', '.');
+            string t = token.Replace('_', '.');
+            return n.IndexOf(t, StringComparison.OrdinalIgnoreCase) >= 0;
+        }
+
+        internal static string ReadServerId(Server server)
+        {
+            try
+            {
+                string id = NormalizeServerIdentity(server.ServerID);
+                if (!string.IsNullOrEmpty(id)) return id;
+                string objName = server.gameObject != null ? server.gameObject.name : null;
+                return NormalizeServerIdentity(objName);
+            }
+            catch { return null; }
+        }
+
+        private static string NormalizeServerIdentity(string value)
+        {
+            if (string.IsNullOrWhiteSpace(value)) return null;
+            string text = value.Trim();
+            int clone = text.IndexOf("(Clone)", StringComparison.OrdinalIgnoreCase);
+            if (clone >= 0) text = text.Substring(0, clone).Trim();
+            if (!text.StartsWith("Server.", StringComparison.OrdinalIgnoreCase)) return null;
+            return text;
+        }
+
+        private void EnqueuePending(ServerVariantSpec spec)
+        {
+            _pendingInsertions.Enqueue(new PendingInsertion { Spec = spec, CreatedAt = DateTime.UtcNow });
+            while (_pendingInsertions.Count > 12) _pendingInsertions.Dequeue();
+        }
+
+        private ServerVariantSpec PeekPendingSpecForSpawn(int price)
+        {
+            // Peek (kein Konsum!): Der Eintrag bleibt fuer die Insertion
+            // erhalten und wird erst dort verbraucht (FinalizeInsertedServer).
+            DateTime now = DateTime.UtcNow;
+            int count = _pendingInsertions.Count;
+            ServerVariantSpec match = null;
+            for (int i = 0; i < count; i++)
+            {
+                var pending = _pendingInsertions.Dequeue();
+                if (now - pending.CreatedAt > TimeSpan.FromMinutes(10)) continue; // stale: droppen
+                if (match == null && pending.Spec.Price == price)
+                    match = pending.Spec;
+                _pendingInsertions.Enqueue(pending);
+            }
+            return match;
+        }
+
+        private void RememberSpawnedUid(int uid)
+        {
+            try { _spawnedUidCreatedAt[uid] = DateTime.UtcNow; } catch { /* best-effort */ }
+        }
+
+        private ServerVariantSpec DequeueMatchingPendingSpec(Server server)
+        {
+            if (_pendingInsertions.Count == 0) return null;
+            ServerVariantSpec match = null;
+            ServerVariantSpec nameOnlyFallback = null;
+            int count = _pendingInsertions.Count;
+            DateTime now = DateTime.UtcNow;
+            for (int i = 0; i < count; i++)
+            {
+                var pending = _pendingInsertions.Dequeue();
+                if (now - pending.CreatedAt > TimeSpan.FromMinutes(10)) continue;
+                if (match == null && LooksLikeBaseForSpec(server, pending.Spec))
+                    match = pending.Spec;
+                else
+                {
+                    // Fallback: Name passt zur Spec-Familie, Speed aber nicht
+                    // (z.B. Base-Speed im Spiel gedriftet oder bereits vorkonfiguriert).
+                    // Pending-Kaeufe sind begrenzt/gueltig - besser als nichts.
+                    if (nameOnlyFallback == null)
+                    {
+                        try
+                        {
+                            string n = server.gameObject != null ? server.gameObject.name ?? "" : "";
+                            if (NameMatchesBaseToken(n, pending.Spec.BaseRuntimeToken))
+                                nameOnlyFallback = pending.Spec;
+                        }
+                        catch { }
+                    }
+                    _pendingInsertions.Enqueue(pending);
+                }
+            }
+            if (match == null && nameOnlyFallback != null)
+            {
+                Log.Warning($"Nutze Name-only-Match {nameOnlyFallback.VariantDisplayName} " +
+                    "(Base-Speed passt nicht - Spiel gedriftet oder vorkonfiguriert).");
+                RemoveOnePendingSpec(nameOnlyFallback);
+                return nameOnlyFallback;
+            }
+            if (match == null)
+            {
+                // Letzter Fallback: aeltester gueltiger Pending-Kauf (FIFO).
+                // Greift wenn Identitaet unkenntlich ist (z.B. Fremd-Rename wie
+                // gregID:Server:...). Bewusst laut, damit Fehl-Zuordnungen
+                // im Log sichtbar sind.
+                DateTime now2 = DateTime.UtcNow;
+                ServerVariantSpec oldest = null;
+                DateTime oldestAt = DateTime.MaxValue;
+                foreach (var pending in _pendingInsertions)
+                {
+                    if (now2 - pending.CreatedAt > TimeSpan.FromMinutes(10)) continue;
+                    if (pending.CreatedAt < oldestAt)
+                    {
+                        oldestAt = pending.CreatedAt;
+                        oldest = pending.Spec;
+                    }
+                }
+                if (oldest != null)
+                {
+                    string srv = "";
+                    try { srv = server.gameObject != null ? server.gameObject.name ?? "" : ""; } catch { }
+                    Log.Warning($"Nutze FIFO-Fallback {oldest.VariantDisplayName} " +
+                        $"fuer Insert '{srv}' (kein Match moeglich).");
+                    RemoveOnePendingSpec(oldest);
+                    return oldest;
+                }
+            }
+            return match;
+        }
+
+        private void RemoveOnePendingSpec(ServerVariantSpec spec)
+        {
+            int count = _pendingInsertions.Count;
+            bool removed = false;
+            DateTime now = DateTime.UtcNow;
+            for (int i = 0; i < count; i++)
+            {
+                var pending = _pendingInsertions.Dequeue();
+                if (now - pending.CreatedAt > TimeSpan.FromMinutes(10)) continue;
+                if (!removed && string.Equals(pending.Spec.VariantId, spec.VariantId, StringComparison.OrdinalIgnoreCase))
+                    removed = true;
+                else
+                    _pendingInsertions.Enqueue(pending);
+            }
+        }
+
+        // Hinweis: Kein hartes Loeschen von Pending-State bei Shop-Aktionen
+        // mehr (Clear/Cancel): gekaufte Items existieren physisch weiter, und
+        // ein Wipe zerstoert die Kauf->Insert-Korrelation. Abgelaufenes
+        // raeumen Expiry-Pfade weg (Pending 10min, Spawn-UIDs 60s).
+
+        /// <summary>Serialisiert Marker fuer GregSaveGuard-Sidecar.</summary>
+        internal string RegistrySerialize()
+        {
+            try { return _registry.Serialize(); } catch { return ""; }
+        }
+
+        /// <summary>Laedt Marker aus GregSaveGuard-Sidecar.</summary>
+        internal void RegistryDeserialize(string content)
+        {
+            try { _registry.Deserialize(content); } catch { }
+        }
+
+        private static bool Approx(float a, float b) => Math.Abs(a - b) < 0.001f;
+
+        private static bool IsServerItemType(PlayerManager.ObjectInHand itemType)
+        {
+            return itemType == PlayerManager.ObjectInHand.Server1U ||
+                   itemType == PlayerManager.ObjectInHand.Server2U ||
+                   itemType == PlayerManager.ObjectInHand.Server3U;
+        }
+    }
+}
