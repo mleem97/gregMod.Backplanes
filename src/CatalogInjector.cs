@@ -48,7 +48,7 @@ namespace GregMod.Backplanes
         private readonly HashSet<string> _registeredIds =
             new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
-        // Varianten-ItemID (9001-9008) -> Base-ItemID (fuer GetPrefabForItem-Mapping).
+        // Varianten-ItemID (9001-9020) -> Base-ItemID (fuer GetPrefabForItem-Mapping).
         private readonly Dictionary<int, int> _variantToBaseId = new Dictionary<int, int>();
 
         // Pending purchases awaiting rack insertion (bounded, expiring).
@@ -302,41 +302,43 @@ namespace GregMod.Backplanes
                     _shopDumped = true;
                     DumpShopItems(source, shop);
                 }
-                if (_registeredIds.Count >= ServerVariantSpec.All.Length) return;
-
-                int added = 0;
-                foreach (var spec in ServerVariantSpec.All)
+                // Kartentexte IMMER erneuern — auch wenn alle Varianten schon
+                // registriert sind. Sonst bleibt "Unknown" stehen, sobald die
+                // Vanilla-Karte Start/UpdateVisualState erneut rendert.
+                if (_registeredIds.Count < ServerVariantSpec.All.Length)
                 {
-                    if (_registeredIds.Contains(spec.VariantId)) continue;
-                    if (ShopContainsVariant(shop, spec))
+                    int added = 0;
+                    foreach (var spec in ServerVariantSpec.All)
                     {
-                        _registeredIds.Add(spec.VariantId);
-                        continue;
+                        if (_registeredIds.Contains(spec.VariantId)) continue;
+                        if (ShopContainsVariant(shop, spec))
+                        {
+                            _registeredIds.Add(spec.VariantId);
+                            continue;
+                        }
+                        // Eigene IDs duerfen nie mit Vanilla kollidieren.
+                        if (VanillaUsesItemId(shop, spec.VariantItemId))
+                        {
+                            Log.Error($"Varianten-ID {spec.VariantItemId} ({spec.VariantDisplayName}) kollidiert " +
+                                "mit Vanilla - Variante uebersprungen.");
+                            continue;
+                        }
+                        var baseItem = FindBaseShopItem(shop, spec);
+                        if (baseItem == null) continue;
+                        int baseId = 0;
+                        try { baseId = baseItem.shopItemSO != null ? baseItem.shopItemSO.itemID : 0; } catch { }
+                        var clone = CloneShopItemForVariant(shop, baseItem, spec);
+                        if (clone != null && AppendShopItem(shop, clone))
+                        {
+                            _registeredIds.Add(spec.VariantId);
+                            _variantToBaseId[spec.VariantItemId] = baseId;
+                            added++;
+                            Log.Info($"Registered shop item {spec.VariantDisplayName}.");
+                        }
                     }
-                    // Eigene IDs duerfen nie mit Vanilla kollidieren.
-                    if (VanillaUsesItemId(shop, spec.VariantItemId))
-                    {
-                        Log.Error($"Varianten-ID {spec.VariantItemId} ({spec.VariantDisplayName}) kollidiert " +
-                            "mit Vanilla - Variante uebersprungen.");
-                        continue;
-                    }
-                    var baseItem = FindBaseShopItem(shop, spec);
-                    if (baseItem == null) continue;
-                    int baseId = 0;
-                    try { baseId = baseItem.shopItemSO != null ? baseItem.shopItemSO.itemID : 0; } catch { }
-                    var clone = CloneShopItemForVariant(shop, baseItem, spec);
-                    if (clone != null && AppendShopItem(shop, clone))
-                    {
-                        _registeredIds.Add(spec.VariantId);
-                        _variantToBaseId[spec.VariantItemId] = baseId;
-                        added++;
-                        Log.Info($"Registered shop item {spec.VariantDisplayName}.");
-                    }
+                    if (added > 0)
+                        Log.Info($"Shop registration from {source}: +{added} variant(s), {_registeredIds.Count}/{ServerVariantSpec.All.Length} ready.");
                 }
-                if (added > 0)
-                    Log.Info($"Shop registration from {source}: +{added} variant(s), {_registeredIds.Count}/{ServerVariantSpec.All.Length} ready.");
-                // Immer: Vanilla ueberschreibt Kartentexte per ID-Lookup beim
-                // Oeffnen - unsere Texte danach erneut setzen.
                 RefreshVariantCardTexts(source, shop);
             }
             catch (Exception ex)
@@ -489,8 +491,8 @@ namespace GregMod.Backplanes
             try
             {
                 if (!IsServerItemType(itemType)) return;
-                // Strict Name -> Varianten-ID. KEIN Preis-Fallback: 8 Varianten
-                // teilen sich 2 Preis-Punkte (20000/100000), Preis allein ist
+                // Strict Name -> Varianten-ID. KEIN Preis-Fallback: 20 Varianten
+                // teilen 5 Preis-Punkte (20k/100k/250k/500k/1M), Preis allein ist
                 // nicht eindeutig und hat in v1.x Phantom-/Fehl-Konfigurationen
                 // verursacht (BUGFIX_NOTES #7). Ohne Match wird NICHT getrackt —
                 // ein erratener Spec laeuft Gefahr, den falschen Server zu
@@ -499,7 +501,7 @@ namespace GregMod.Backplanes
                 string how = "Name-Match";
                 if (spec == null)
                 {
-                    // Exakte Varianten-ItemID (9001-9008) ist eindeutig.
+                    // Exakte Varianten-ItemID (9001-9020) ist eindeutig.
                     spec = FindSpecByVariantId(itemId);
                     how = "ID-Match";
                 }
@@ -517,7 +519,7 @@ namespace GregMod.Backplanes
             }
         }
 
-        /// <summary>Exakter Match ueber Varianten-ItemID (9001-9008).</summary>
+        /// <summary>Exakter Match ueber Varianten-ItemID (9001-9020).</summary>
         private static ServerVariantSpec FindSpecByVariantId(int itemId)
         {
             try
@@ -740,9 +742,21 @@ namespace GregMod.Backplanes
                     float live;
                     try { live = server.maxProcessingSpeed; }
                     catch { DropWatched(ptr); continue; } // zerstoert
-                    if (Approx(live, spec.RuntimeProcessingSpeed)) continue;
-                    Log.Warning($"Watchlist: {spec.VariantDisplayName} gedriftet " +
-                        $"(live={live:F3} erwartet={spec.RuntimeProcessingSpeed:F3}) - konfiguriere neu.");
+                    bool speedDrifted = !Approx(live, spec.RuntimeProcessingSpeed);
+                    InspectPorts(server, spec, out int freeBad, out int found);
+                    // Ports pruefen, nicht nur IOPS: frisch gekaufte 500K-Server
+                    // blieben sonst bei Vanilla-connectionSpeed=0.2 („1 Gbps"),
+                    // waehrend maxProcessingSpeed korrekt war (v2.1.3).
+                    bool portsNeedFix = freeBad > 0 || found == 0;
+                    if (!speedDrifted && !portsNeedFix) continue;
+                    if (speedDrifted)
+                        Log.Warning($"Watchlist: {spec.VariantDisplayName} gedriftet " +
+                            $"(live={live:F3} erwartet={spec.RuntimeProcessingSpeed:F3}) - konfiguriere neu.");
+                    else if (freeBad > 0 && ModConfig.VerboseLogging)
+                        Log.Info($"Watchlist: {spec.VariantDisplayName} — {freeBad} freie Port(s) mit falscher Bandbreite " +
+                            $"(erwartet {spec.RuntimeNetworkSpeed * 5f:0.##} Gbps) - konfiguriere neu.");
+                    else if (found == 0 && ModConfig.VerboseLogging)
+                        Log.Info($"Watchlist: {spec.VariantDisplayName} — keine Ports gefunden - versuche Re-Suche.");
                     if (!RepairGuard.TryEnter(ptr)) continue;
                     try
                     {
@@ -763,6 +777,31 @@ namespace GregMod.Backplanes
             {
                 Log.Warning($"Watchlist-Tick fehlgeschlagen: {ex.Message}");
             }
+        }
+
+        /// <summary>
+        /// Read-only port audit for one server: counts found links and free ports
+        /// whose connectionSpeed is still off-spec (1 Gbps / 0.2 vs. target).
+        /// </summary>
+        private static int InspectPorts(Server server, ServerVariantSpec spec, out int freeBad, out int found)
+        {
+            freeBad = 0;
+            found = 0;
+            try
+            {
+                foreach (var link in CollectServerLinks(server))
+                {
+                    found++;
+                    bool busy = false;
+                    try { busy = link.cableIDsOnLink != 0 || link.insertedSFP != null; } catch { continue; }
+                    if (busy) continue;
+                    float ls;
+                    try { ls = link.connectionSpeed; } catch { continue; }
+                    if (!Approx(ls, spec.RuntimeNetworkSpeed)) freeBad++;
+                }
+            }
+            catch { /* best-effort */ }
+            return found;
         }
 
         private static void DropWatched(IntPtr ptr)
@@ -834,12 +873,16 @@ namespace GregMod.Backplanes
                 ConfigureServerAndPorts(server, spec, source, out bool serverChanged, out int changedPorts);
                 ForceServerDisplayRefresh(server);
                 string id = ReadServerId(server);
+                if (string.IsNullOrEmpty(id) && saveData != null)
+                {
+                    try { id = NormalizeServerIdentity(saveData.serverID); } catch { id = null; }
+                }
                 if (!string.IsNullOrEmpty(id)) _registry.Set(id, spec);
                 _pendingSpecsByPointer.Remove(ptr);
                 // KEIN RemoveOnePendingSpec hier: ein Kauf wird genau einmal
                 // konsumiert - an der Spawn-Stelle (ConsumePendingSpecForSpawn)
                 // bzw. in DequeueMatchingPendingSpec. Ein zweiter Konsum hier
-                // wuerde einen Folge-Kauf desselben Preispunkts (20000/100000)
+                // wuerde einen Folge-Kauf desselben Preispunkts (20k/100k/250k/500k/1M)
                 // fehl-verbrauchen und zu Fehl-Zuordnung fuehren.
                 Log.Info($"Finalized {spec.VariantDisplayName} from {source}: serverChanged={serverChanged}, changedPorts={changedPorts}.");
             }
@@ -973,6 +1016,13 @@ namespace GregMod.Backplanes
                     if (ConfigurePort(link, spec, server))
                         changedPorts++;
                 }
+                if (links.Count == 0 && ModConfig.VerboseLogging)
+                {
+                    // Insert oft vor CableLink.Start/RegisterLink: Ports noch nicht
+                    // erreichbar -> Watchlist retryet alle 5 s (v2.1.3).
+                    Log.Info($"Configure {spec.VariantDisplayName} from {source}: 0 Ports gefunden " +
+                        "(Links noch nicht registriert?) - Watchlist-Retry aktiv.");
+                }
 
                 // Visual differentiation (tint + scale). Idempotent and cheap after
                 // the first pass; runs on every configure path (spawn/insert/repair).
@@ -1000,47 +1050,208 @@ namespace GregMod.Backplanes
         {
             var result = new List<CableLink>();
             var seen = new HashSet<IntPtr>();
-            void Add(CableLink link)
+            int rawCablelinks = 0, rawActive = 0, rawChildren = 0, rejected = 0;
+            void Add(CableLink link, bool force)
             {
                 if (link == null) return;
                 IntPtr p = IntPtr.Zero;
                 try { p = link.Pointer; } catch { return; }
-                if (p != IntPtr.Zero && seen.Add(p) && IsServerLinkFor(link, server))
-                    result.Add(link);
+                if (p == IntPtr.Zero || !seen.Add(p)) return;
+                if (force || IsServerLinkFor(link, server)) result.Add(link);
+                else rejected++;
             }
             try
             {
                 if (server.cablelinks != null)
-                    foreach (var link in server.cablelinks) Add(link);
+                    foreach (var link in server.cablelinks) { rawCablelinks++; Add(link, true); }
             }
             catch { /* best-effort */ }
             try
             {
                 if (server.activeLinks != null)
-                    foreach (var link in server.activeLinks) Add(link);
+                    foreach (var link in server.activeLinks) { rawActive++; Add(link, false); }
             }
             catch { /* best-effort */ }
             try
             {
-                foreach (var link in server.GetComponentsInChildren<CableLink>(true)) Add(link);
+                // Kinder-Scan: Ports ausserhalb IsServerLinkFor-Filter akzeptieren,
+                // solange sie nicht eindeutig Switch/PatchPanel zugeordnet sind.
+                // typeOfLink kann vor RegisterLink noch None sein (v2.1.3).
+                foreach (var link in server.GetComponentsInChildren<CableLink>(true))
+                {
+                    rawChildren++;
+                    bool foreign = false;
+                    try { foreign = link.parentSwitch != null || link.parentPatchPanel != null; } catch { }
+                    if (foreign) { rejected++; continue; }
+                    Add(link, true);
+                }
             }
             catch { /* best-effort */ }
+            // Fallback: scene-weite Suche nach parentServer-Pointer-Match
+            // (Ports ggf. nicht unter der Server-Hierarchie).
+            if (result.Count == 0)
+            {
+                try
+                {
+                    IntPtr want = IntPtr.Zero;
+                    try { want = server.Pointer; } catch { return result; }
+                    if (want == IntPtr.Zero) return result;
+                    foreach (var link in Resources.FindObjectsOfTypeAll<CableLink>())
+                    {
+                        if (link == null) continue;
+                        Server parent = null;
+                        try { parent = link.parentServer; } catch { continue; }
+                        if (parent == null) continue;
+                        IntPtr have = IntPtr.Zero;
+                        try { have = parent.Pointer; } catch { continue; }
+                        if (have == want) { rawActive++; Add(link, true); }
+                    }
+                }
+                catch { /* best-effort */ }
+            }
+            if (result.Count == 0 && ModConfig.VerboseLogging)
+            {
+                Log.Info($"CollectServerLinks empty: cablelinks={rawCablelinks} active={rawActive} " +
+                    $"children={rawChildren} rejected={rejected} (ptr=0x{SafePtr(server):X}).");
+            }
             return result;
+        }
+
+        private static IntPtr SafePtr(Server server)
+        {
+            try { return server.Pointer; } catch { return IntPtr.Zero; }
         }
 
         private static bool IsServerLinkFor(CableLink link, Server server)
         {
             try
             {
-                if (link.typeOfLink != CableLink.TypeOfLink.Server) return false;
                 if (link.parentSwitch != null || link.parentPatchPanel != null) return false;
-                if (link.parentServer == null) return true; // unassigned server-side port
-                IntPtr a = IntPtr.Zero, b = IntPtr.Zero;
-                try { a = link.parentServer.Pointer; } catch { return false; }
-                try { b = server.Pointer; } catch { return false; }
-                return a == b;
+                if (link.parentServer != null)
+                {
+                    IntPtr a = IntPtr.Zero, b = IntPtr.Zero;
+                    try { a = link.parentServer.Pointer; } catch { return false; }
+                    try { b = server.Pointer; } catch { return false; }
+                    return a == b;
+                }
+                // Unassigned server-side port: typeOfLink kann vor RegisterLink
+                // noch None sein — None + Server akzeptieren, Rest ablehnen.
+                return link.typeOfLink == CableLink.TypeOfLink.Server
+                    || link.typeOfLink == CableLink.TypeOfLink.None;
             }
             catch { return false; }
+        }
+
+        /// <summary>
+        /// Called from Server.RegisterLink postfix: configure this port the moment
+        /// the game wires it to a known variant server (fixes stuck 1 Gbps ports
+        /// when insert ran before ports were discoverable).
+        /// </summary>
+        internal void OnLinkRegistered(string source, Server server, CableLink link)
+        {
+            try
+            {
+                if (server == null || link == null) return;
+                ServerVariantSpec spec = ResolveSpecForRegisteredServer(server);
+                if (spec == null) return;
+                IntPtr ptr = IntPtr.Zero;
+                try { ptr = server.Pointer; } catch { return; }
+                if (!RepairGuard.TryEnter(ptr)) return;
+                try
+                {
+                    if (ConfigurePort(link, spec, server) && ModConfig.VerboseLogging)
+                        Log.Info($"Port configured via {source} for {spec.VariantDisplayName} " +
+                            $"(speed={link.connectionSpeed:F3} -> {spec.RuntimeNetworkSpeed:F3}).");
+                }
+                finally { RepairGuard.Exit(ptr); }
+            }
+            catch (Exception ex)
+            {
+                if (ModConfig.VerboseLogging) Log.Warning($"OnLinkRegistered failed: {ex.Message}");
+            }
+        }
+
+        /// <summary>
+        /// Called from CableLink.Start postfix: parentServer may already be set;
+        /// configure early so empty ports never stay at Vanilla 0.2 (1 Gbps).
+        /// </summary>
+        internal void OnLinkStarted(CableLink link)
+        {
+            try
+            {
+                if (link == null) return;
+                Server server = null;
+                try { server = link.parentServer; } catch { }
+                if (server == null)
+                {
+                    try
+                    {
+                        var parents = link.GetComponentsInParent<Server>(true);
+                        if (parents != null && parents.Length > 0) server = parents[0];
+                    }
+                    catch { /* best-effort */ }
+                }
+                if (server == null) return;
+                OnLinkRegistered("CableLink.Start", server, link);
+            }
+            catch (Exception ex)
+            {
+                if (ModConfig.VerboseLogging) Log.Warning($"OnLinkStarted failed: {ex.Message}");
+            }
+        }
+
+        /// <summary>
+        /// Called from CableLink.InsertSFP postfix: a real module just slid in.
+        /// If the game negotiated the port down earlier (e.g. cable first at
+        /// 1 Gbps, module second), raise the cap back to the tier speed ONCE.
+        /// Never lowers, never touches modules — effective rate stays
+        /// min(cap, module, cable) as the game computes it.
+        /// </summary>
+        internal void ReassertPortCapAfterModuleInsert(string source, CableLink link)
+        {
+            try
+            {
+                if (link == null) return;
+                Server server = null;
+                try { server = link.parentServer; } catch { return; }
+                if (server == null) return;
+                var spec = ResolveSpecForRegisteredServer(server);
+                if (spec == null) return;
+                IntPtr ptr = IntPtr.Zero;
+                try { ptr = link.Pointer; } catch { return; }
+                if (ptr == IntPtr.Zero || !RepairGuard.TryEnter(ptr)) return;
+                try
+                {
+                    float live = -1f;
+                    try { live = link.connectionSpeed; } catch { return; }
+                    if (!Approx(live, spec.RuntimeNetworkSpeed) && live < spec.RuntimeNetworkSpeed)
+                    {
+                        try { link.SetConnectionSpeed(spec.RuntimeNetworkSpeed); } catch { /* best-effort */ }
+                        try { link.connectionSpeed = spec.RuntimeNetworkSpeed; } catch { /* best-effort */ }
+                        Log.Info($"Port cap re-asserted for {spec.VariantDisplayName} ({source}): " +
+                            $"{live:F3} -> {spec.RuntimeNetworkSpeed:F3} (module inserted).");
+                    }
+                }
+                finally { RepairGuard.Exit(ptr); }
+            }
+            catch (Exception ex)
+            {
+                Log.Warning($"Port cap re-assert failed: {ex.Message}");
+            }
+        }
+
+        private ServerVariantSpec ResolveSpecForRegisteredServer(Server server)
+        {
+            IntPtr ptr = IntPtr.Zero;
+            try { ptr = server.Pointer; } catch { return null; }
+            if (ptr != IntPtr.Zero && _pendingSpecsByPointer.TryGetValue(ptr, out var byPointer))
+                return byPointer;
+            var byRegistry = ResolveSpecForServer(server);
+            if (byRegistry != null) return byRegistry;
+            // Tier: Server laeuft bereits auf Varianten-Speed (nach Finalize/Insert).
+            var byTier = InferSpecBySpeedTier(server);
+            if (byTier != null) return byTier;
+            return null;
         }
 
         private static bool ConfigurePort(CableLink link, ServerVariantSpec spec, Server server)
@@ -1068,9 +1279,20 @@ namespace GregMod.Backplanes
                 try { if (!link.isSFPPort) { link.isSFPPort = true; changed = true; } } catch { /* best-effort */ }
                 try { if (!link.isFibrePort) { link.isFibrePort = true; changed = true; } } catch { /* best-effort */ }
                 try { if (link.sfpTypeSupported != spec.SfpType) { link.sfpTypeSupported = spec.SfpType; changed = true; } } catch { /* best-effort */ }
-                try { if (link.sfpTypeInserted != spec.SfpType) { link.sfpTypeInserted = spec.SfpType; changed = true; } } catch { /* best-effort */ }
-                // Only clear the module slot when it is already empty; never yank hardware.
-                // (Direct-fiber profile: no module required.)
+                // NIE sfpTypeInserted auf leeren Ports setzen: Das erzeugt ein
+                // Phantom-Modul (Typ gesetzt, aber insertedSFP == null). Das Spiel
+                // hält den Port dann für belegt (echte SFP+/SFP28-Module werden
+                // abgewiesen) und rendert kein Modell (nichts da). Umgekehrt:
+                // Altlasten früherer Versionen reparieren (gesetzt ohne Modul -> 0).
+                try
+                {
+                    if (!hasModule && link.sfpTypeInserted != 0)
+                    {
+                        link.sfpTypeInserted = 0;
+                        changed = true;
+                    }
+                }
+                catch { /* best-effort */ }
                 try
                 {
                     if (link.parentServer == null)
@@ -1122,19 +1344,26 @@ namespace GregMod.Backplanes
                         $"live={live:F3} erwartet={spec.RuntimeProcessingSpeed:F3}.");
                     return;
                 }
-                int checkedPorts = 0, badPorts = 0;
+                int checkedPorts = 0, badPorts = 0, foundPorts = 0, busyPorts = 0;
                 foreach (var link in CollectServerLinks(server))
                 {
+                    foundPorts++;
                     bool busy = false;
                     try { busy = link.cableIDsOnLink != 0 || link.insertedSFP != null; } catch { continue; }
-                    if (busy) continue;
+                    if (busy) { busyPorts++; continue; }
                     checkedPorts++;
                     float ls;
                     try { ls = link.connectionSpeed; } catch { continue; }
                     if (!Approx(ls, spec.RuntimeNetworkSpeed)) badPorts++;
                 }
                 Log.Info($"Verify {spec.VariantDisplayName} ({source}): OK " +
-                    $"max={live:F3}, Ports geprueft={checkedPorts}, abweichend={badPorts}.");
+                    $"max={live:F3}, Ports gefunden={foundPorts}, geprueft={checkedPorts}, " +
+                    $"belegt={busyPorts}, abweichend={badPorts}.");
+                if (badPorts > 0)
+                {
+                    Log.Warning($"Verify {spec.VariantDisplayName}: {badPorts} freie Port(s) noch auf falscher " +
+                        $"Bandbreite (erwartet {spec.RuntimeNetworkSpeed * 5f:0.##} Gbps = {spec.RuntimeNetworkSpeed:F3}).");
+                }
             }
             catch (Exception ex)
             {
@@ -1151,6 +1380,8 @@ namespace GregMod.Backplanes
         {
             int ok = 0, mismatch = 0, unknown = 0;
             var mismatchNames = new List<string>();
+            int auditLines = 0;
+            const int MaxAuditLines = 30;
             try
             {
                 Server[] servers;
@@ -1186,6 +1417,11 @@ namespace GregMod.Backplanes
                             mismatchNames.Add($"{spec.VariantDisplayName} @{n}");
                         }
                     }
+                    // Link-Audit (read-only, nur Varianten-Server): zeigt pro
+                    // belegtem Port Cap, Kabel, Modul (+Modul-Speed) und Gegen-
+                    // seite. Klaert "es kommen nur 1 Gbit an" ohne Raten.
+                    if (auditLines < MaxAuditLines)
+                        auditLines += AuditConnectedLinks(spec, server, MaxAuditLines - auditLines);
                 }
             }
             catch (Exception ex)
@@ -1199,6 +1435,59 @@ namespace GregMod.Backplanes
             LastVerifySummary = $"Verify ({source}): OK={ok} Mismatch={mismatch} Unbekannt={unknown}" +
                 (mismatchNames.Count > 0 ? " | z.B. " + string.Join(", ", mismatchNames.ToArray()) : "");
             Log.Info(LastVerifySummary);
+        }
+
+        /// <summary>
+        /// Read-only Link-Audit fuer einen Varianten-Server. Gibt die Anzahl
+        /// geloggter Zeilen zurueck (Budget vom Aufrufer). Schreibt nie.
+        /// </summary>
+        private static int AuditConnectedLinks(ServerVariantSpec spec, Server server, int budget)
+        {
+            int lines = 0;
+            try
+            {
+                if (spec == null || server == null || budget <= 0) return 0;
+                string srvName = "";
+                try { srvName = server.gameObject != null ? server.gameObject.name ?? "" : ""; } catch { }
+                foreach (var link in CollectServerLinks(server))
+                {
+                    if (lines >= budget) break;
+                    if (link == null) continue;
+                    bool hasCable = false, hasModule = false;
+                    try { hasCable = link.cableIDsOnLink != 0; } catch { continue; }
+                    try { hasModule = link.insertedSFP != null; } catch { }
+                    if (!hasCable && !hasModule) continue;
+                    float portGbps = -1f;
+                    try { portGbps = link.connectionSpeed * 5f; } catch { }
+                    string modText = "nein";
+                    try
+                    {
+                        if (hasModule)
+                        {
+                            float ms = -1f;
+                            try { ms = link.insertedSFP.speed * 5f; } catch { }
+                            modText = ms >= 0f ? $"{ms:0.##}Gbps" : "ja";
+                        }
+                    }
+                    catch { modText = "ja?"; }
+                    string far = "?";
+                    try
+                    {
+                        if (link.parentSwitch != null)
+                            far = "switch:" + (link.parentSwitch.gameObject != null ? link.parentSwitch.gameObject.name ?? "?" : "?");
+                        else if (link.parentPatchPanel != null)
+                            far = "patch:" + (link.parentPatchPanel.gameObject != null ? link.parentPatchPanel.gameObject.name ?? "?" : "?");
+                        else if (!string.IsNullOrEmpty(link.switchID))
+                            far = "switchID:" + link.switchID;
+                    }
+                    catch { /* best-effort */ }
+                    lines++;
+                    Log.Info($"Link-Audit {spec.VariantDisplayName} @{srvName}: port={portGbps:0.##}Gbps " +
+                        $"kabel={(hasCable ? "ja" : "nein")} modul={modText} -> {far}");
+                }
+            }
+            catch { /* audit best-effort */ }
+            return lines;
         }
 
         // ------------------------------------------------------------- resolving
@@ -1335,8 +1624,15 @@ namespace GregMod.Backplanes
             string text = value.Trim();
             int clone = text.IndexOf("(Clone)", StringComparison.OrdinalIgnoreCase);
             if (clone >= 0) text = text.Substring(0, clone).Trim();
-            if (!text.StartsWith("Server.", StringComparison.OrdinalIgnoreCase)) return null;
-            return text;
+            // gregCore HardwareIdPersistencePatch stamps stable ids as
+            // gregID:Server:<12-hex>. Vanilla/legacy ids are Server.<name>.
+            if (text.StartsWith("gregID:Server:", StringComparison.OrdinalIgnoreCase))
+            {
+                int tail = text.IndexOf('_');
+                return tail > 0 ? text.Substring(0, tail) : text;
+            }
+            if (text.StartsWith("Server.", StringComparison.OrdinalIgnoreCase)) return text;
+            return null;
         }
 
         private void EnqueuePending(ServerVariantSpec spec)

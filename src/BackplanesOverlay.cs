@@ -37,11 +37,20 @@ namespace GregMod.Backplanes
             if (willShow) Rebuild();
             _chrome.Toggle();
             Log.Info("Backplanes panel " + (_chrome.IsVisible ? "shown (F6)." : "hidden."));
+            try { if (GregHost.HasCore) ReportOpenState(); } catch { /* best-effort */ }
         }
         catch (Exception ex)
         {
             Log.Error("Panel toggle failed: " + ex.GetBaseException().Message);
         }
+    }
+
+    // Separate Methode (JIT-Trennung): beruehrt gregCore-Typen und wird nur
+    // aufgerufen, wenn GregHost.HasCore true ist. Meldet den Panel-Status ans
+    // F1-Hub (GregMenuRegistry), damit Offen/Zu + Schliessen stimmen.
+    private static void ReportOpenState()
+    {
+        try { gregCore.UI.GregMenuRegistry.SetOpen("backplanes", IsVisible); } catch { /* best-effort */ }
     }
 
     public static void Refresh()

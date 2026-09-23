@@ -48,7 +48,7 @@ namespace GregMod.Backplanes
 
                 if (!Throttle(serverId)) return true;
                 Log.Info($"Cable guidance: {serverId ?? "<unknown>"} works best with " +
-                         (expected == 4 ? "4-lane fiber (QSFP+)" : "1-lane fiber (SFP28)") +
+                         (expected == 4 ? "4-lane fiber / QSFP module" : "1-lane fiber (SFP28)") +
                          $", held cable looks like {lanes}-lane. Connecting anyway — performance may be limited.");
                 NotifyWrongCable();
                 return true;
@@ -64,10 +64,16 @@ namespace GregMod.Backplanes
         {
             try
             {
-                // Variant speeds are the stable fingerprint: 1.0 -> 1 lane, 5.0 -> 4 lanes.
+                // Prefer the resolved variant spec (all tiers, including 1M/2M/4M).
                 float speed = server.maxProcessingSpeed;
-                if (Math.Abs(speed - 5.0f) < 0.01f) return 4;
+                foreach (var spec in ServerVariantSpec.All)
+                {
+                    if (Math.Abs(speed - spec.RuntimeProcessingSpeed) < 0.01f)
+                        return spec.FiberLaneCount;
+                }
+                // Fallback: 100K (internal 1.0) is 1-lane; larger boosted tiers are QSFP 4-lane.
                 if (Math.Abs(speed - 1.0f) < 0.01f) return 1;
+                if (speed >= 4.0f) return 4;
                 return -1;
             }
             catch { return -1; }

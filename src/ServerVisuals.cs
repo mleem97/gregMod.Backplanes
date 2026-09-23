@@ -42,6 +42,19 @@ namespace GregMod.Backplanes
 
         private static readonly string[] FamilyColorWords = { "yellow", "blue", "purple", "green" };
 
+        // Exakte Body-Materialnamen je Familie (aus Live-Discovery, 18:46-Log).
+        // Klein geschrieben, ohne " (Instance)"-Suffix vergleichen. Familien
+        // ohne Eintrag fallen auf Proximity-Matching zurueck; sobald deren
+        // Discovery-Zeile im Log steht, hier nachtragen.
+        private static readonly Dictionary<string, string[]> ExactBodyMaterials =
+            new Dictionary<string, string[]>(StringComparer.OrdinalIgnoreCase)
+            {
+                { "systemx", new[] { "brushedaluminiumyellow", "yellow" } },
+            };
+
+        private static readonly HashSet<string> DiscoveryLogged =
+            new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
         // Generous: vanilla body colors are strongly saturated, distances between
         // families are large (~1.0+), so 0.6 separates well without clipping edge cases.
         private const float ProximityThreshold = 0.6f;
@@ -149,9 +162,18 @@ namespace GregMod.Backplanes
                 return;
             }
 
-            // Diagnose immer beim ersten Durchlauf pro Spec (nicht nur verbose):
-            // Ohne Materialnamen raten wir blind.
-            bool discoveryLogged = false;
+            // Diagnose einmal pro Familie (nicht pro Configure): Die Namen sind
+            // pro Familie stabil, jede weitere Zeile waere Spam. Modelle UND
+            // Materialien: Das Modell-Inventar zeigt, woraus der Server besteht
+            // (Austausch-Basis), die Materialien dienen dem Tint-Matching.
+            lock (Sync)
+            {
+                if (DiscoveryLogged.Add(spec.FamilyKey))
+                {
+                    Log.Info($"Model discovery for {spec.FamilyKey} on '{root.name}': {DescribeModels(root)}");
+                    Log.Info($"Material discovery for {spec.FamilyKey} on '{root.name}': {DescribeMaterials(renderers)}");
+                }
+            }
             int tinted = 0;
             Renderer fallbackRend = null;
             int fallbackMat = -1;
@@ -170,12 +192,6 @@ namespace GregMod.Backplanes
                     if (mat == null) continue;
                     string matName = "";
                     try { matName = mat.name ?? ""; } catch { continue; }
-
-                    if (!discoveryLogged)
-                    {
-                        discoveryLogged = true;
-                        Log.Info($"Material discovery for {spec.VariantDisplayName} on '{root.name}': {DescribeMaterials(renderers)}");
-                    }
 
                     if (IsExcluded(matName)) continue;
 
@@ -246,6 +262,22 @@ namespace GregMod.Backplanes
 
         private static bool ShouldTint(Material mat, string matName, ServerVariantSpec spec)
         {
+            // Exakter Treffer zuerst (deterministisch, kein Raten).
+            try
+            {
+                string norm = matName ?? "";
+                int inst = norm.IndexOf(" (Instance)", StringComparison.OrdinalIgnoreCase);
+                if (inst >= 0) norm = norm.Substring(0, inst);
+                norm = norm.Trim().ToLowerInvariant();
+                if (norm.Length > 0 && ExactBodyMaterials.TryGetValue(spec.FamilyKey, out var exact))
+                {
+                    foreach (var name in exact)
+                    {
+                        if (norm == name) return true;
+                    }
+                }
+            }
+            catch { /* fallback unten */ }
             string lower = matName.ToLowerInvariant();
             foreach (var word in FamilyColorWords)
             {
@@ -274,6 +306,62 @@ namespace GregMod.Backplanes
                 if (lower.Contains(part)) return true;
             }
             return false;
+        }
+
+        /// <summary>
+        /// Modell-Inventar: Hierarchie-Pfade + Mesh-Namen + Renderer-Bestueckung.
+        /// Zeigt, aus welchen Modellen/Assets ein Server besteht (Austausch-Basis).
+        /// Begrenzt auf 64 Knoten / Tiefe 6 — Server sind flach, Racks/Raeume nicht.
+        /// </summary>
+        private static string DescribeModels(GameObject root)
+        {
+            var parts = new System.Collections.Generic.List<string>();
+            try
+            {
+                var queue = new System.Collections.Generic.Queue<(Transform t, int depth, string path)>();
+                if (root == null || root.transform == null) return "<kein root>";
+                queue.Enqueue((root.transform, 0, root.name ?? "?"));
+                while (queue.Count > 0 && parts.Count < 64)
+                {
+                    var (t, depth, path) = queue.Dequeue();
+                    if (t == null || depth > 6) continue;
+                    string extra = "";
+                    try
+                    {
+                        var mf = t.gameObject != null ? t.gameObject.GetComponent<MeshFilter>() : null;
+                        if (mf != null && mf.sharedMesh != null)
+                            extra += "[Mesh:" + (mf.sharedMesh.name ?? "?") + "]";
+                    }
+                    catch { }
+                    try
+                    {
+                        var rend = t.gameObject != null ? t.gameObject.GetComponent<Renderer>() : null;
+                        if (rend != null)
+                        {
+                            int n = 0;
+                            try { var mats = rend.sharedMaterials; if (mats != null) n = mats.Length; } catch { }
+                            extra += "[Renderer:" + n + "mats]";
+                        }
+                    }
+                    catch { }
+                    parts.Add(path + extra);
+                    try
+                    {
+                        for (int i = 0; i < t.childCount; i++)
+                        {
+                            var c = t.GetChild(i);
+                            if (c == null) continue;
+                            queue.Enqueue((c, depth + 1, path + "/" + (c.gameObject != null ? c.gameObject.name ?? "?" : "?")));
+                        }
+                    }
+                    catch { }
+                }
+            }
+            catch (System.Exception ex)
+            {
+                parts.Add("<Abbruch: " + ex.Message + ">");
+            }
+            return string.Join(" | ", parts);
         }
 
         private static string DescribeMaterials(Renderer[] renderers)

@@ -4,7 +4,7 @@ using MelonLoader;
 using UnityEngine;
 using UnityEngine.InputSystem;
 
-[assembly: MelonInfo(typeof(GregMod.Backplanes.BackplanesMod), "gregMod.Backplanes", "2.1.1", "TeamGreg Modding")]
+[assembly: MelonInfo(typeof(GregMod.Backplanes.BackplanesMod), "gregMod.Backplanes", "2.2.1", "TeamGreg Modding")]
 [assembly: MelonGame("Waseku", "Data Center")]
 
 namespace GregMod.Backplanes
@@ -67,11 +67,11 @@ namespace GregMod.Backplanes
     }
 
     /// <summary>
-    /// gregMod.Backplanes v2.1.1 — refactored successor of BackplaneBoostServers v1.0.1.
+    /// gregMod.Backplanes v2.2.1 — refactored successor of BackplaneBoostServers v1.0.1.
     ///
-    /// 8 high-IOPS backplane server variants (SystemX / RISC / Mainframe / GPU,
-    /// 100K on SFP28 + 500K on QSFP+) with save/load-safe persistence and runtime
-    /// visual differentiation (tint + taller look).
+    /// 20 high-IOPS backplane server variants (SystemX / RISC / Mainframe / GPU ×
+    /// 100K/500K/1M/2M/4M) with bandwidth tiers aligned to gregMod.MoreModules
+    /// (QSFP28/56/DD), save/load-safe persistence and runtime visual differentiation.
     /// Panel + camera locking follow gregMod.MusicPlayer (gregCore UI Toolkit stack).
     /// See docs/BUGFIX_NOTES.md for the v1.x issue -&gt; fix mapping.
     /// </summary>
@@ -88,7 +88,7 @@ namespace GregMod.Backplanes
             {
                 Instance = this;
                 ModConfig.Load();
-                Log.Info("Initializing gregMod.Backplanes v2.1.1 (refactored from BackplaneBoostServers v1.0.1).");
+                Log.Info("Initializing gregMod.Backplanes v2.2.1 (refactored from BackplaneBoostServers v1.0.1).");
                 Log.Info($"Press {ModConfig.ToggleKey} for the Backplanes panel.");
                 Patches.Apply(HarmonyInstance);
                 if (GregHost.HasCore)
@@ -226,7 +226,7 @@ namespace GregMod.Backplanes
             try
             {
                 gregCore.Core.Mods.GregModRegistry.Register(
-                    "gregMod.Backplanes", "Backplanes", "2.1.1",
+                    "gregMod.Backplanes", "Backplanes", "2.2.1",
                     new string[] { "backplanes" });
             }
             catch (Exception ex)
@@ -243,6 +243,8 @@ namespace GregMod.Backplanes
             {
                 gregCore.UI.GregHudRegistry.Register("backplanes", ModConfig.ToggleKey.ToString(), "Backplanes");
                 gregCore.UI.GregMenuRegistry.RegisterOpener("backplanes", () => BackplanesOverlay.Toggle());
+                gregCore.UI.GregMenuRegistry.RegisterCloser("backplanes",
+                    () => { try { if (BackplanesOverlay.IsVisible) BackplanesOverlay.Toggle(); } catch { /* best-effort */ } });
             }
             catch (Exception ex)
             {
