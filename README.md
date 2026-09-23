@@ -3,7 +3,7 @@
 > High-IOPS backplane server variants for **Data Center** — refactored successor of the abandoned `BackplaneBoostServers` v1.0.1 mod.
 
 [![License](https://img.shields.io/badge/License-Apache%202.0-green?style=for-the-badge)](./LICENSE)
-[![Version](https://img.shields.io/badge/Version-2.1.1-orange?style=for-the-badge)]()
+[![Version](https://img.shields.io/badge/Version-2.2.1-orange?style=for-the-badge)]()
 [![GameVersion](https://img.shields.io/badge/Game%20Version-1.1.0-yellow?style=for-the-badge)]()
 [![Unity](https://img.shields.io/badge/Unity-6000.4.12f1-black?style=for-the-badge&logo=unity&logoColor=white)]()
 
@@ -15,22 +15,26 @@
 
 ## Overview
 
-Adds 8 buyable high-IOPS server variants to the shop. Boosted servers are visually
-distinct: recolored body (orange / violet / red / lime per family) and a taller look
-(4U/8U style — visual only, rack slots unchanged).
+Adds buyable high-IOPS backplane server variants to the shop. Boosted servers are
+visually distinct: recolored body (orange / violet / red / lime per family) and a
+taller look (4U/8U style — visual only, rack slots unchanged).
 
-| Server      | Variant   | Uplink | Recommended cable |
-|-------------|-----------|--------|-------------------|
-| SystemX 3U  | 100K IOPS | 25G    | 1-lane fiber (SFP28) |
-| SystemX 7U  | 500K IOPS | 40G    | 4-lane fiber (QSFP+) |
-| RISC 3U     | 100K IOPS | 25G    | 1-lane fiber (SFP28) |
-| RISC 7U     | 500K IOPS | 40G    | 4-lane fiber (QSFP+) |
-| Mainframe 3U| 100K IOPS | 25G    | 1-lane fiber (SFP28) |
-| Mainframe 7U| 500K IOPS | 40G    | 4-lane fiber (QSFP+) |
-| GPU 3U      | 100K IOPS | 25G    | 1-lane fiber (SFP28) |
-| GPU 7U      | 500K IOPS | 40G    | 4-lane fiber (QSFP+) |
+Five bandwidth tiers per family (**20 variants**), aligned with
+[gregMod.MoreModules](https://steamcommunity.com/workshop/filedetails/?id=3719510811)
+(QSFP28/56/DD modules, same vanilla QSFP+ `sfpType` — ports accept them out of the box):
 
-Prices: 20K (100K) / 100K (500K). Shop cards show the recommended cable family in the label.
+| Tier | IOPS | Uplink / port | Recommended module | Price | Unlock | Base |
+|------|------|---------------|--------------------|-------|--------|------|
+| 100K | 100 000 | 25G | SFP28 (1-lane fiber) | 20 000 $ | 10 000 xp | 3U |
+| 500K | 500 000 | 40G | QSFP+ 40G | 100 000 $ | 25 000 xp | 7U |
+| 1M | 1 000 000 | 100G | QSFP28 100G | 250 000 $ | 50 000 xp | 7U |
+| 2M | 2 000 000 | 200G | QSFP56 200G | 500 000 $ | 100 000 xp | 7U |
+| 4M | 4 000 000 | 400G | QSFP-DD 400G | 1 000 000 $ | 200 000 xp | 7U |
+
+Families: **SystemX · RISC · Mainframe · GPU** (item IDs 9001–9020; no clash with
+MoreModules IDs 1000–3999). More Gbps ⇒ higher price. Shop labels show the
+recommended module; empty ports are pre-profiled for that form factor (connected
+ports are never rewritten).
 
 ## In-game panel (F6)
 

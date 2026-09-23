@@ -1,9 +1,12 @@
 # ISSUE-001 - Modded Server verlieren nach Save/Reload IOPS + Port-Config
 
-- **Status:** Fix v2.1.0 (To-Verify) - siehe `../BUGFIX_NOTES.md` #1/#2
+- **Status:** Fix v2.1.0 + v2.1.2 (To-Verify) - siehe `../BUGFIX_NOTES.md` #1/#2
 - **Prioritaet:** Hoch
 - **Bereich:** Save-Repair, RuntimeVariantRegistry, Spawning
-- **Mod:** BackplaneBoostServers v1.0.0/v1.0.1 -> gregMod.Backplanes v2.1.0
+- **Mod:** BackplaneBoostServers v1.0.0/v1.0.1 -> gregMod.Backplanes v2.1.0/v2.1.2
+- **Root cause v2.1.2:** gregCore stamped `gregID:Server:<hex>`; `NormalizeServerIdentity`
+  only accepted `Server.*` → `_registry.Set` never ran → every `greg_backplanes.*.tsv`
+  stayed header-only → no repair after reload.
 - **Berichte (Steam Workshop):**
   - *DaSlayerOfGames, 18 May* - 125K-IOPS-Server (drei Stueck, erste drei Kunden) nach
     Save/Reload zurueck auf 5K; einziger Fix war "Rebuy + Reinstall" aus dem Shop

@@ -13,7 +13,7 @@ im Code behoben) · **Fixed** (bestätigt).
 |---|-------|--------|-----------|---------|----------|
 | [001](ISSUE-001-save-reload-config-verlust.md) | Modded Server verlieren nach Save/Reload IOPS + Port-Config | Fix v2.1.0 (To-Verify) | Hoch | Save-Repair | DaSlayerOfGames, Felix_IT, M@dm@X, MFDuskink |
 | [002](ISSUE-002-stackoverflow-saveload-crash.md) | Stack Overflow (0xC00000FD) beim Laden von Saves mit modded Servern | Fix v2.1.0 (To-Verify) | Hoch | Save-Repair | BrassPeddler |
-| [003](ISSUE-003-port-kabel-sfp-anforderungen.md) | Ports verlangen bei jedem Laden andere Kabel/SFP; 0G Max; kein Wiedereinstecken | Fix v2.1.0 (To-Verify) | Hoch | Ports/Cables | Brilyn911, Shaun Eyebright |
+| [003](ISSUE-003-port-kabel-sfp-anforderungen.md) | Ports verlangen bei jedem Laden andere Kabel/SFP; 0G Max; kein Wiedereinstecken; 1 Gbps trotz 500K | Fix v2.1.0 + v2.1.3 (To-Verify); Matrix v2.2.0 | Hoch | Ports/Cables | Brilyn911, Shaun Eyebright, Playtest |
 | [004](ISSUE-004-custom-farben-kabel-racks.md) | Custom-Farben für Kabel/Racks liefern immer Default-Farbe | Fix v2.1.0 (To-Verify) | Mittel | Shop/Cart | Shaun Eyebright, Gothicdude1044, Revoltec, DNFplays |
 | [005](ISSUE-005-shop-klick-doppelartikel.md) | Shop-Kauf: erster Klick zählt nicht / doppelte Artikel bei einmaliger Zahlung | Fix v2.1.1 (Spawning-FIFO) | Mittel | Shop/Cart | Shaun Eyebright |
 | [006](ISSUE-006-inkompatibel-svcservice.md) | Inkompatibilität mit „Svc Service“-Mod → Saves laden nicht | Open (To-Verify) | Mittel | Kompatibilität | szymon511, BrassPeddler |

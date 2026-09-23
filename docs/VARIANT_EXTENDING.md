@@ -1,31 +1,41 @@
 # VARIANT_EXTENDING — eigene Server-Varianten hinzufügen
 
-Alle Varianten sind datengetrieben in `src/ServerVariantSpec.cs` (`ServerVariantSpec.All`).
-Eine neue Variante ist ein Eintrag — kein neuer Patch nötig.
+Alle Varianten sind datengetrieben in `src/ServerVariantSpec.cs` (`ServerVariantSpec.All`,
+aktuell 20 Einträge über `Make(...)`). Eine neue Variante ist ein Eintrag — kein neuer
+Patch nötig.
 
-## Beispiel: 1M-IOPS Variante auf Mainframe-7U-Basis
+## Tiers (v2.2.0)
+
+Pro Familie: **100K/25G · 500K/40G · 1M/100G · 2M/200G · 4M/400G** — mehr Gbps = teurer.
+Ab 40G `SfpType = 3` (Vanilla-QSFP+), damit **gregMod.MoreModules**-Module (QSFP28/56/DD)
+ohne Port-Hacks passen. `RecommendedModule` landet im Shop-Label.
+
+## Beispiel: 1M-IOPS Variante auf Mainframe-7U-Basis (`Make(...)`)
 
 ```csharp
-new ServerVariantSpec
-{
-    FamilyKey = "mainframe",
-    BaseDisplayName = "Mainframe 7U 12000 IOPs",      // muss den Shop-Namen des Basis-Servers enthalten
-    BaseAssetName = "ShopItemSO_Server_Purple2",       // Asset-Name des Basis-ShopItems
-    VariantId = "greg_backplanes_mainframe_1m",        // eindeutig, stabil — NIE nachträglich ändern
-    VariantDisplayName = "Mainframe 1M IOPS",          // Shop-/Cart-Anzeige
-    Iops = 1000000,                                    // 1M / 100000 = 10.0 interne Speed
-    Price = 250000,
-    XpToUnlock = 50000,
-    ConnectorHint = "QSFP+",
-    NetworkSpeedGbps = 40f,                            // intern /5 → 8
-    SfpType = 3,                                       // 2 = SFP28, 3 = QSFP+
-    FiberLaneCount = 4,                                // 1 oder 4 (nur Anzeige/Empfehlung)
-    BaseSpeed = 0.12f,                                 // 0.05f für 3U-Basis, 0.12f für 7U-Basis
-    TintColor = new Color(1f, 0.2f, 0.5f, 1f),         // Wunsch-Farbe (Orange/Violett/Rot/Lime-Schema beachten)
-    FamilyBaseColor = new Color(0.5f, 0f, 1f, 1f),     // Vanilla-Körperfarbe für Material-Matching
-    ScaleY = 8f / 7f,                                  // 4f/3f für 3U-Basis (visuell only)
-},
+Make(
+    "mainframe",
+    "Mainframe 7U 12000 IOPs",           // BaseDisplayName 3U (Contains-Match)
+    "ShopItemSO_Server_Purple2",          // BaseAssetName 3U
+    "Mainframe 7U 12000 IOPs",            // BaseDisplayName 7U (falls small=false)
+    "ShopItemSO_Server_Purple2",          // BaseAssetName 7U
+    "Mainframe",                          // VariantId-Prefix → greg_backplanes_mainframe_<sizekey>
+    1000000,                              // IOPS (intern /100000 → 10.0)
+    250000,                               // Price (mehr Gbps ⇒ teurer)
+    50000,                                // XpToUnlock
+    9015,                                 // VariantItemId (9001-9020, eindeutig)
+    "QSFP28",                             // ConnectorHint (Shop-Label)
+    100f,                                 // NetworkSpeedGbps (intern /5 → 20)
+    3,                                    // SfpType (3 = Vanilla-QSFP+, MoreModules)
+    4,                                    // FiberLaneCount
+    "QSFP28 100G",                        // RecommendedModule (Label)
+    new Color(0.2f, 0.6f, 1f, 1f),        // TintColor (Familien-Schema)
+    new Color(0.5f, 0f, 1f, 1f),          // FamilyBaseColor (Vanilla-Matching)
+    small: false                          // true = 3U-Basis, false = 7U-Basis
+),
 ```
+
+`SizeKey` und `VariantId` leiten sich aus IOPS ab (`100k`/`500k`/`1m`/`2m`/`4m`).
 
 ## Regeln
 
@@ -39,18 +49,23 @@ new ServerVariantSpec
 4. **`VariantId` ist die Persistenz-Identität** (Sidecar `server-variants.tsv`).
    Einmal in Saves verwendet → nie umbenennen, sonst verwaiste Marker (sie werden
    geloggt, aber nicht mehr zugeordnet). Legacy-Präfixe siehe `LegacyPrefixes`.
-5. **`FiberLaneCount`** steuert nur Shop-Label (`1-lane fiber` / `4-lane fiber`) und
-   die Kabel-Empfehlung — geblockt wird nichts.
-6. **Größenwahn vermeiden:** extrem hohe IOPS-Werte (> ein paar Millionen) wurden nicht
+5. **`FiberLaneCount` / `RecommendedModule`** steuern nur Shop-Label und die
+   Kabel-/Modul-Empfehlung — geblockt wird nichts.
+6. **MoreModules:** ab 40G `SfpType = 3` (Vanilla-QSFP+) belassen; Modul-Gbps landet
+   in `RecommendedModule` (z. B. `QSFP56 200G`). IDs 9001–9020 bleiben frei von
+   MoreModules (1000–3999).
+7. **Größenwahn vermeiden:** extrem hohe IOPS-Werte (> ein paar Millionen) wurden nicht
    getestet; das Spiel balanciert Kundenbedarfe um Vanilla-Werte.
-7. **Visuals:** `TintColor` aus dem Familien-Schema wählen (SystemX=Orange, RISC=Violett,
-   Mainframe=Rot, GPU=Lime; 500K jeweils heller). `FamilyBaseColor` = Vanilla-Körperfarbe
+8. **Visuals:** `TintColor` aus dem Familien-Schema wählen (SystemX=Orange, RISC=Violett,
+   Mainframe=Rot, GPU=Lime; höhere Tier jeweils kräftiger). `FamilyBaseColor` = Vanilla-Körperfarbe
    für das Material-Matching. `ScaleY` = 4/3 (3U) bzw. 8/7 (7U) — visuell only.
 
 ## Test-Checkliste (im Spiel)
 
-- [ ] Variante erscheint im Shop mit korrektem Namen/Preis
+- [ ] Alle 20 Shop-Einträge: Name, Preis, XP, empfohlenes Modul
 - [ ] Kauf → Rack-Einbau → IOPS + Port-Speed korrekt, Farbe + Höhe sichtbar
+- [ ] Leere Ports: 40/100/200/400 Gbps statt 1 Gbps; belegte Ports unangetastet
+- [ ] MoreModules-Module (100G–400G) stecken in QSFP+-Ports ohne Port-Hacks
 - [ ] Save → Quit to Desktop → Reload → Werte + Visuals bleiben (ohne Neu-Kauf)
 - [ ] Kabel abziehen/wieder anstecken funktioniert
 - [ ] Technician-Reparatur (EOL) behält die Variante

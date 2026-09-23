@@ -1,5 +1,55 @@
 # BUGFIX_NOTES — v1.x reports → v2.x fixes
 
+## v2.2.0 — Variant matrix × MoreModules (2026-09-23)
+
+Feature release: four families × five bandwidth tiers (100K/25G · 500K/40G ·
+1M/100G · 2M/200G · 4M/400G). Tiers ≥40G use vanilla QSFP+ `sfpType` so
+**gregMod.MoreModules** modules (QSFP28/56/DD, IDs 1000–3999) insert without
+port hacks; shop labels show the recommended module. Item IDs 9001–9020.
+`SizeKey` derived from IOPS (100k/500k/1m/2m/4m).
+
+---
+
+## v2.1.3 — Port speeds stuck at 1 Gbps on boosted servers (playtest, 2026-09-23)
+
+**Symptom:** fresh 500K servers show `1 Gbps` on every uplink (IOPS OK:
+`Verify … max=5.000`, but `Ports geprueft=0`); log never changed a port.
+
+**Root cause:** `ConfigureServerAndPorts` ran from `ServerInsertedInRack` before the
+game had registered `CableLink`s (`typeOfLink` still `None` / `parentServer` unset /
+`cablelinks` empty). `IsServerLinkFor` required `typeOfLink == Server` → 0 links →
+ports kept Vanilla `connectionSpeed = 0.2` (UI format `{0:0.##} Gbps` with
+`connectionSpeed * 5` → “1 Gbps”). The 5 s watchlist only re-checked
+`maxProcessingSpeed`, so a correct IOPS value never triggered a port repair.
+
+**Fix:**
+- Harmony postfixes on `Server.RegisterLink` and `CableLink.Start` →
+  `OnLinkRegistered` / `OnLinkStarted` configure a single port for known variants
+  (before `parentServer`/`typeOfLink` are fully wired, via `GetComponentsInParent`
+  fallback on Start).
+- `CollectServerLinks`: `cablelinks` force-accepted; children scan accepts
+  ports while `typeOfLink` is `None` (only rejects Switch/PatchPanel parents);
+  empty result falls back to `Resources.FindObjectsOfTypeAll<CableLink>` matching
+  `parentServer` pointer; empty search logs raw counts when verbose.
+- `TickWatchlist` inspects free ports every 5 s and reconfigures on wrong speed or
+  0 found ports (IOPS-correct servers no longer skip port repair).
+- Verify logs `gefunden` / `belegt` / `abweichend` and warns with the expected Gbps.
+
+---
+
+## v2.1.2 — Marker persistence with gregCore hardware IDs (2026-09-23)
+
+Sidecars were written but **always empty** (`# serverId\tvariantId` only). Root cause:
+gregCore's `HardwareIdPersistencePatch` stamps servers as `gregID:Server:<12-hex>`, while
+`CatalogInjector.NormalizeServerIdentity` only accepted `Server.*`. Every
+`_registry.Set(...)` early-returned → no markers → no repair after reload → boosted
+servers fell back to base IOPS.
+
+**Fix:** accept `gregID:Server:*` (strip Unity `_suffix` if present), keep `Server.*` for
+legacy, fall back to `ServerSaveData.serverID` on insert when `Server.ServerID` is empty.
+
+---
+
 ## v2.1.1 — Purchase-to-variant mapping hardened (playtest findings from Workshop discussion)
 
 Phase-2 verification against the **live game assembly** (`Assembly-CSharp.dll`, decompiled

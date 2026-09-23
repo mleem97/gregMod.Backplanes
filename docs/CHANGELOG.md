@@ -1,5 +1,41 @@
 # Changelog
 
+## v2.2.1
+
+- **Shop variant cards show the real name again instead of "Unknown":**
+  `TryRegisterAll` always runs `RefreshVariantCardTexts` (previously early-returned
+  once all 20 variants were registered); added a `ShopItem.Start` postfix (the game
+  ID-lookup writes "Unknown" for item IDs 9001–9020).
+
+## v2.2.0
+
+- **Variant matrix expanded to 20 servers** (4 families × 5 bandwidth tiers): new
+  1M / 2M / 4M IOPS tiers with 100G / 200G / 400G ports (QSFP28 / QSFP56 / QSFP-DD).
+- **gregMod.MoreModules compatibility:** tiers ≥40G use vanilla QSFP+ `sfpType` (3) so
+  MoreModules 100G–400G modules insert without port hacks; shop labels name the
+  recommended module; empty ports advertise matching connector/module profile.
+- Prices scale with Gbps (20K → 1M $); XP unlocks scale with tier. Item IDs 9001–9020
+  (no clash with MoreModules 1000–3999).
+- `SizeKey` is derived from IOPS (no longer binary 100k/500k); shop name matching
+  prefers the longest `VariantDisplayName`.
+
+## v2.1.3
+
+- **Boosted-server ports stuck at Vanilla 1 Gbps fixed:** Harmony postfixes on
+  `Server.RegisterLink` and `CableLink.Start` configure known variant ports as soon as
+  the game wires them (insert previously ran before ports were discoverable →
+  `Ports geprueft=0`). `CollectServerLinks` accepts unassigned ports while
+  `typeOfLink` is still `None`, falls back to a scene-wide `parentServer` pointer
+  match, and logs raw source counts when empty. Watchlist now audits free port speeds
+  every 5 s (not just `maxProcessingSpeed`) and retries when 0 ports are found.
+  Verify logs `gefunden` / `belegt` / `abweichend`.
+
+## v2.1.2
+
+- Persisted boosted servers survive save/reload: `ReadServerId` accepts gregCore's stable
+  `gregID:Server:<hex>` ids (previously only `Server.*`, so every sidecar stayed empty and
+  no markers were ever written). Insert path falls back to `ServerSaveData.serverID`.
+
 ## v2.1.1
 
 - Purchase-to-variant mapping hardened, verified against the live game assembly
