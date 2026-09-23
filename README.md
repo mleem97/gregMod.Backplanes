@@ -9,6 +9,7 @@
 
 ## Links
 
+- **Steam Workshop:** [My Workshop (Data Center)](https://steamcommunity.com/id/frikadelle3000/myworkshopfiles/?appid=4170200)
 - **Discord / Support:** [discord.gg/greg](https://discord.gg/greg)
 - **Website:** [gregframework.eu](https://gregframework.eu)
 
