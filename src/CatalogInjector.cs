@@ -651,9 +651,18 @@ namespace GregMod.Backplanes
                 catch { }
 
                 int end = Math.Min(i + MaxCardsPerRow, cards.Count);
+                int moved = 0;
                 for (int j = i; j < end; j++)
                 {
-                    try { cards[j].SetParent(ovGo.transform, false); } catch { }
+                    try { cards[j].SetParent(ovGo.transform, false); moved++; } catch { }
+                }
+
+                // Keinen leeren sichtbaren Overflow stehen lassen.
+                if (moved == 0)
+                {
+                    try { ovGo.SetActive(false); } catch { }
+                    try { UnityEngine.Object.Destroy(ovGo); } catch { }
+                    continue;
                 }
 
                 try
