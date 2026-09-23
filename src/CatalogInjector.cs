@@ -571,8 +571,12 @@ namespace GregMod.Backplanes
             try
             {
                 if (root == null || string.IsNullOrEmpty(ovName)) return null;
-                foreach (Transform child in root)
+                int n = 0;
+                try { n = root.childCount; } catch { n = 0; }
+                for (int ci = 0; ci < n; ci++)
                 {
+                    Transform child = null;
+                    try { child = root.GetChild(ci); } catch { continue; }
                     if (child == null) continue;
                     string nm = "";
                     try { nm = child.gameObject != null ? child.gameObject.name ?? "" : ""; } catch { continue; }
@@ -599,8 +603,12 @@ namespace GregMod.Backplanes
             {
                 if (root == null) return;
                 var doomed = new System.Collections.Generic.List<GameObject>();
-                foreach (Transform child in root)
+                int rootKids = 0;
+                try { rootKids = root.childCount; } catch { rootKids = 0; }
+                for (int ci = 0; ci < rootKids; ci++)
                 {
+                    Transform child = null;
+                    try { child = root.GetChild(ci); } catch { continue; }
                     if (child == null) continue;
                     string nm = "";
                     try { nm = child.gameObject != null ? child.gameObject.name ?? "" : ""; } catch { continue; }
@@ -608,8 +616,12 @@ namespace GregMod.Backplanes
                     bool hasCard = false;
                     try
                     {
-                        foreach (Transform k in child)
+                        int kk = 0;
+                        try { kk = child.childCount; } catch { kk = 0; }
+                        for (int ki = 0; ki < kk; ki++)
                         {
+                            Transform k = null;
+                            try { k = child.GetChild(ki); } catch { continue; }
                             if (k == null) continue;
                             ShopItem si = null;
                             try { si = k.gameObject != null ? k.gameObject.GetComponent<ShopItem>() : null; }
@@ -641,8 +653,12 @@ namespace GregMod.Backplanes
             Transform row = null;
             try
             {
-                foreach (Transform child in root)
+                int n = 0;
+                try { n = root.childCount; } catch { n = 0; }
+                for (int ci = 0; ci < n; ci++)
                 {
+                    Transform child = null;
+                    try { child = root.GetChild(ci); } catch { continue; }
                     if (child == null) continue;
                     try { if (child.GetInstanceID() == rowId) { row = child; break; } } catch { }
                 }
@@ -658,8 +674,14 @@ namespace GregMod.Backplanes
             var overflowRows = new System.Collections.Generic.List<Transform>();
             try
             {
-                foreach (Transform sibling in row.parent)
+                Transform rowParent = null;
+                try { rowParent = row.parent; } catch { rowParent = null; }
+                int sn = 0;
+                try { sn = rowParent != null ? rowParent.childCount : 0; } catch { sn = 0; }
+                for (int si2 = 0; si2 < sn; si2++)
                 {
+                    Transform sibling = null;
+                    try { sibling = rowParent.GetChild(si2); } catch { continue; }
                     if (sibling == null || sibling == row) continue;
                     string nm = "";
                     try { nm = sibling.gameObject != null ? sibling.gameObject.name ?? "" : ""; } catch { continue; }
@@ -677,7 +699,18 @@ namespace GregMod.Backplanes
                     // schlägt es fehl, bleibt sonst eine leere Reihe stehen).
                     try { ov.gameObject.SetActive(false); } catch { }
                     var kids = new System.Collections.Generic.List<Transform>();
-                    foreach (Transform k in ov) { if (k != null) kids.Add(k); }
+                    try
+                    {
+                        int kn = 0;
+                        try { kn = ov.childCount; } catch { kn = 0; }
+                        for (int ki = 0; ki < kn; ki++)
+                        {
+                            Transform k = null;
+                            try { k = ov.GetChild(ki); } catch { continue; }
+                            if (k != null) kids.Add(k);
+                        }
+                    }
+                    catch { }
                     foreach (var k in kids)
                     {
                         try { k.SetParent(row, false); } catch { }
@@ -691,8 +724,12 @@ namespace GregMod.Backplanes
             var cards = new System.Collections.Generic.List<Transform>();
             try
             {
-                foreach (Transform k in row)
+                int rn = 0;
+                try { rn = row.childCount; } catch { rn = 0; }
+                for (int ri = 0; ri < rn; ri++)
                 {
+                    Transform k = null;
+                    try { k = row.GetChild(ri); } catch { continue; }
                     if (k == null) continue;
                     ShopItem si = null;
                     try { si = k.gameObject != null ? k.gameObject.GetComponent<ShopItem>() : null; } catch { }
@@ -736,7 +773,18 @@ namespace GregMod.Backplanes
                 try
                 {
                     var stale = new System.Collections.Generic.List<Transform>();
-                    foreach (Transform k in ovGo.transform) { if (k != null) stale.Add(k); }
+                    try
+                    {
+                        int sk = 0;
+                        try { sk = ovGo.transform.childCount; } catch { sk = 0; }
+                        for (int ski = 0; ski < sk; ski++)
+                        {
+                            Transform k = null;
+                            try { k = ovGo.transform.GetChild(ski); } catch { continue; }
+                            if (k != null) stale.Add(k);
+                        }
+                    }
+                    catch { }
                     foreach (var k in stale)
                     {
                         try { UnityEngine.Object.Destroy(k.gameObject); } catch { }

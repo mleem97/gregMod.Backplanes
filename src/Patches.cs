@@ -294,6 +294,8 @@ namespace GregMod.Backplanes
                 _checkoutColors.Clear();
                 _checkoutTypes.Clear();
                 _checkoutCartIndexes.Clear();
+                _checkoutQuantities.Clear();
+                _checkoutUnitOffsets.Clear();
                 _checkoutSpawnUids.Clear();
                 _checkoutColoredUids.Clear();
                 try
@@ -301,19 +303,29 @@ namespace GregMod.Backplanes
                     var cart = __instance.cartUIItems;
                     if (cart != null)
                     {
+                        int unitsBefore = 0;
                         for (int i = 0; i < cart.Count; i++)
                         {
                             var it = cart[i];
-                            if (it == null || !it.hasCustomColor) continue;
-                            _checkoutColors.Add(it.itemColor);
-                            _checkoutTypes.Add(it.itemType);
-                            _checkoutCartIndexes.Add(i);
+                            int qty = 1;
+                            try { if (it != null) qty = Math.Max(1, it.Quantity); } catch { }
+                            if (it != null && it.hasCustomColor)
+                            {
+                                _checkoutColors.Add(it.itemColor);
+                                _checkoutTypes.Add(it.itemType);
+                                _checkoutCartIndexes.Add(i);
+                                _checkoutQuantities.Add(qty);
+                                _checkoutUnitOffsets.Add(unitsBefore);
+                            }
+                            unitsBefore += qty;
                         }
                     }
                 }
                 catch (Exception ex) { Log.Warning("checkout color snapshot failed: " + ex.Message); }
                 Log.Info($"[Color] checkout snapshot: {_checkoutColors.Count} custom-color cart entr(ies) " +
-                         $"indexes=[{string.Join(",", _checkoutCartIndexes)}]");
+                         $"indexes=[{string.Join(",", _checkoutCartIndexes)}] " +
+                         $"qty=[{string.Join(",", _checkoutQuantities)}] " +
+                         $"offsets=[{string.Join(",", _checkoutUnitOffsets)}]");
             }
             catch (Exception ex) { Log.Warning("SpawnAllPrefix failed: " + ex.Message); }
         }
@@ -331,27 +343,34 @@ namespace GregMod.Backplanes
                 // Vanilla wendet oft nur das erste Custom-Color-Item an (bzw.
                 // SpawnPhysicalItem liefert kaputte UIDs). Nachziehen: alle
                 // Custom-Color-Cart-Eintraege der Spawn-Reihenfolge zuordnen.
-                // Cart-Zeile i -> Spawn i (1:1), auch wenn dazwischen Nicht-Customs liegen.
+                // Zeile mit Quantity Q belegt Q aufeinanderfolgende Spawns ab
+                // ihrem Unit-Offset (kumulierte Mengen aller Zeilen davor).
                 int spawned = _checkoutSpawnUids.Count;
-                int colored = 0;
+                int colored = 0, forced = 0;
                 for (int i = 0; i < _checkoutColors.Count; i++)
                 {
-                    int cartIdx = i < _checkoutCartIndexes.Count ? _checkoutCartIndexes[i] : i;
-                    if (cartIdx >= spawned)
+                    int qty = i < _checkoutQuantities.Count ? _checkoutQuantities[i] : 1;
+                    int offset = i < _checkoutUnitOffsets.Count ? _checkoutUnitOffsets[i] : (i < _checkoutCartIndexes.Count ? _checkoutCartIndexes[i] : i);
+                    for (int j = 0; j < qty; j++)
                     {
-                        Log.Warning($"[Color] checkout sweep: custom[{i}] cartIdx={cartIdx} hat keinen Spawn (spawned={spawned})");
-                        continue;
+                        int spawnIdx = offset + j;
+                        if (spawnIdx >= spawned)
+                        {
+                            Log.Warning($"[Color] checkout sweep: custom[{i}] unit {j} hat keinen Spawn (offset={offset}, spawned={spawned})");
+                            break;
+                        }
+                        int uid = _checkoutSpawnUids[spawnIdx];
+                        if (_checkoutColoredUids.Contains(uid))
+                        {
+                            colored++;
+                            continue;
+                        }
+                        Log.Info($"[Color] checkout sweep: custom[{i}] unit {j} spawnIdx={spawnIdx} uid={uid} nicht von Vanilla gefaerbt → force");
+                        ForceApplyColorToUid(__instance, uid, _checkoutColors[i], _checkoutTypes[i]);
+                        forced++;
                     }
-                    int uid = _checkoutSpawnUids[cartIdx];
-                    if (_checkoutColoredUids.Contains(uid))
-                    {
-                        colored++;
-                        continue;
-                    }
-                    Log.Info($"[Color] checkout sweep: custom[{i}] cartIdx={cartIdx} uid={uid} nicht von Vanilla gefaerbt → force");
-                    ForceApplyColorToUid(__instance, uid, _checkoutColors[i], _checkoutTypes[i]);
                 }
-                Log.Info($"[Color] checkout sweep done: {colored}/{_checkoutColors.Count} already colored, spawns={spawned}");
+                Log.Info($"[Color] checkout sweep done: {colored} already colored, {forced} forced, spawns={spawned}");
                 BackplanesMod.Injector.VerifyCheckout("ComputerShop.SpawnAllPurchasedItems");
             }
             catch (Exception ex) { Log.Warning("SpawnAllPostfix failed: " + ex.Message); }
@@ -401,6 +420,8 @@ namespace GregMod.Backplanes
         private static readonly System.Collections.Generic.List<Color> _checkoutColors = new();
         private static readonly System.Collections.Generic.List<PlayerManager.ObjectInHand> _checkoutTypes = new();
         private static readonly System.Collections.Generic.List<int> _checkoutCartIndexes = new();
+        private static readonly System.Collections.Generic.List<int> _checkoutQuantities = new();
+        private static readonly System.Collections.Generic.List<int> _checkoutUnitOffsets = new();
         private static readonly System.Collections.Generic.List<int> _checkoutSpawnUids = new();
         private static readonly System.Collections.Generic.HashSet<int> _checkoutColoredUids = new();
         private static bool _checkoutActive;
@@ -529,6 +550,23 @@ namespace GregMod.Backplanes
                 if (__instance == null) return;
                 int requested = uid;
                 int resolved = ResolveSpawnedUid(__instance, uid);
+                // Checkout: Vanilla ruft pro Spawn mit stale UID (z.B. immer 1).
+                // Frischester Spawn des laufenden Checkouts ist das wahre Ziel —
+                // auch bei Exact-Hit (Key kann ein stale Rest frueherer
+                // Checkouts sein, spawnedItems wird nie geleert).
+                if (_checkoutActive && _checkoutSpawnUids.Count > 0)
+                {
+                    try
+                    {
+                        int last = _checkoutSpawnUids[_checkoutSpawnUids.Count - 1];
+                        if (__instance.spawnedItems != null && __instance.spawnedItems.ContainsKey(last) && last != resolved)
+                        {
+                            Log.Info($"[Color] ApplyColor uid checkout-redirect: requested={requested} -> {last} (frischester Spawn)");
+                            resolved = last;
+                        }
+                    }
+                    catch { /* fallback unten */ }
+                }
                 if (resolved != uid)
                 {
                     Log.Info($"[Color] ApplyColor uid remap: requested={uid} -> resolved={resolved} " +
