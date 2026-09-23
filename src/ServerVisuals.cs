@@ -105,7 +105,8 @@ namespace GregMod.Backplanes
 
                 if (wantScale) ApplyScale(root, spec, true);
                 else ApplyScale(root, spec, false); // live restore when toggled off
-                if (wantTint) ApplyTint(root, spec);
+                if (wantTint) ApplyTint(server, root, spec);
+                else RgbAnimator.Drop(server);
                 // NOTE: tint-off cannot restore original material colors (they were
                 // recolored in place); it applies to newly configured servers and
                 // everything is vanilla again after a scene reload. Scale restores live.
@@ -150,7 +151,7 @@ namespace GregMod.Backplanes
             catch { /* best-effort */ }
         }
 
-        private static void ApplyTint(GameObject root, ServerVariantSpec spec)
+        private static void ApplyTint(Il2Cpp.Server server, GameObject root, ServerVariantSpec spec)
         {
             Renderer[] renderers = null;
             try { renderers = root.GetComponentsInChildren<Renderer>(true); } catch { return; }
@@ -178,6 +179,9 @@ namespace GregMod.Backplanes
             Renderer fallbackRend = null;
             int fallbackMat = -1;
             float fallbackSize = 0f;
+            System.Collections.Generic.List<(Renderer, Material, string)> rgbSlots = null;
+            if (spec.RgbAnimated)
+                rgbSlots = new System.Collections.Generic.List<(Renderer, Material, string)>();
             foreach (var rend in renderers)
             {
                 if (rend == null) continue;
@@ -214,7 +218,13 @@ namespace GregMod.Backplanes
                         Color current = Color.white;
                         try { current = mat.GetColor(prop); } catch { continue; }
                         if (ColorsClose(current, spec.TintColor, 0.02f)) continue;
-                        try { mat.SetColor(prop, spec.TintColor); tinted++; } catch { /* best-effort */ }
+                        try
+                        {
+                            mat.SetColor(prop, spec.TintColor);
+                            tinted++;
+                            rgbSlots?.Add((rend, mat, prop));
+                        }
+                        catch { /* best-effort */ }
                     }
                     changed = true;
                 }
@@ -239,7 +249,14 @@ namespace GregMod.Backplanes
                             bool has = false;
                             try { has = mat.HasProperty(prop); } catch { continue; }
                             if (!has) continue;
-                            try { mat.SetColor(prop, spec.TintColor); tinted++; break; } catch { }
+                            try
+                            {
+                                mat.SetColor(prop, spec.TintColor);
+                                tinted++;
+                                rgbSlots?.Add((fallbackRend, mat, prop));
+                                break;
+                            }
+                            catch { }
                         }
                         if (tinted > 0)
                         {
@@ -258,6 +275,13 @@ namespace GregMod.Backplanes
                 Log.Info($"Tinted {tinted} material slot(s) for {spec.VariantDisplayName} -> {spec.TintColor}.");
             else
                 Log.Warning($"Tint {spec.VariantDisplayName}: kein Material passte (siehe discovery oben).");
+
+            try
+            {
+                if (spec.RgbAnimated && rgbSlots != null && rgbSlots.Count > 0)
+                    RgbAnimator.Track(server, rgbSlots);
+            }
+            catch { /* best-effort */ }
         }
 
         private static bool ShouldTint(Material mat, string matName, ServerVariantSpec spec)

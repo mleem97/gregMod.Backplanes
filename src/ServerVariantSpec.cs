@@ -59,6 +59,9 @@ namespace GregMod.Backplanes
         /// <summary>Visual Y scale: 4/3 for 3U-based, 8/7 for 7U-based variants. Visual only.</summary>
         internal float ScaleY;
 
+        /// <summary>RGB-Streifen: Hue rotiert dauerhaft (RgbAnimator), statt statischem Tint.</summary>
+        internal bool RgbAnimated;
+
         internal string IopsText => Iops.ToString(CultureInfo.InvariantCulture);
 
         internal float RuntimeProcessingSpeed => Iops / 100000f;
@@ -107,7 +110,7 @@ namespace GregMod.Backplanes
             string baseDisplayName7, string asset7,
             string displayNamePrefix, int iops, int price, int xp, int itemId,
             string connectorHint, float gbps, int sfpType, int lanes,
-            string module, Color tint, Color familyBase, bool small)
+            string module, Color tint, Color familyBase, bool small, bool rgb = false)
         {
             return new ServerVariantSpec
             {
@@ -129,6 +132,7 @@ namespace GregMod.Backplanes
                 TintColor = tint,
                 FamilyBaseColor = familyBase,
                 ScaleY = small ? 4f / 3f : 8f / 7f,
+                RgbAnimated = rgb,
             };
         }
 
@@ -234,6 +238,12 @@ namespace GregMod.Backplanes
                 "GPU 7U 12000 IOPS", "ShopItemSO_Server_Green2", "GPU",
                 4000000, 1000000, 200000, 9020, "QSFP-DD", 400f, 3, 4, "QSFP-DD 400G",
                 new Color(0.95f, 1.00f, 0.60f, 1f), green, small: false));
+
+            // ---- Titan (Custom): 4 TBit, beide Ports, RGB-Streifen ----
+            list.Add(Make("titan", "GPU 3U 5000 IOPS", "ShopItemSO_Server_Green1",
+                "GPU 7U 12000 IOPS", "ShopItemSO_Server_Green2", "Titan",
+                40000000, 10000000, 2000000, 9021, "QSFP-DD", 4000f, 3, 4, null,
+                new Color(1f, 1f, 1f, 1f), green, small: false, rgb: true));
 
             return list.ToArray();
         }
