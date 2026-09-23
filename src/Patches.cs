@@ -175,9 +175,20 @@ namespace GregMod.Backplanes
             try
             {
                 if (__instance == null) return true;
+                // Varianten-IDs 9001+: Pfad absichtlich sichtbar machen, wenn die
+                // Base-ID-Map unvollstaendig ist (Spawn wuerde stillschweigend
+                // scheitern - GetPrefabForItem liefert dann null).
+                bool isVariant = itemID >= 9001 && itemID <= 9021;
                 if (BackplanesMod.Injector.TryGetBaseId(itemID, out int baseId))
                 {
+                    if (isVariant && ModConfig.VerboseLogging)
+                        Log.Info($"GetPrefabForItem: itemID={itemID} -> baseId={baseId} type={itemType}.");
                     itemID = baseId;
+                }
+                else if (isVariant)
+                {
+                    Log.Warning($"GetPrefabForItem: keine Base-ID fuer itemID={itemID} " +
+                        "(Registrierung/Reset?) - Original sieht die ID nicht, Spawn kann null liefern.");
                 }
                 return true; // Original immer laufen lassen
             }

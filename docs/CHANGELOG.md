@@ -1,5 +1,14 @@
 # Changelog
 
+## v2.2.2
+
+- **Boosted servers silently failed to spawn (playtest):** `TryGetBaseId` rejected
+  base IDs of `0`. Vanilla SystemX's shop card has `itemID=0`, so the map held
+  `9001 → 0` but the remap never ran — `GetPrefabForItem` returned null and
+  `SpawnAllPurchasedItems` skipped the cart entry with no `SpawnPhysicalItem` log.
+  Also: cards that were already marked registered via `ShopContainsVariant` did
+  not refill the base-ID map after `ResetForScene`.
+
 ## v2.2.1
 
 - **Shop variant cards show the real name again instead of "Unknown":**

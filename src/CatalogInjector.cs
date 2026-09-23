@@ -315,6 +315,10 @@ namespace GregMod.Backplanes
                         if (ShopContainsVariant(shop, spec))
                         {
                             _registeredIds.Add(spec.VariantId);
+                            // Karte kann von einer frueheren Registrierung uebrig
+                            // sein, waehrend ResetForScene die Base-ID-Map geloescht
+                            // hat - sonst fehlt das Prefab-Routing beim Spawn.
+                            EnsureBaseIdMapping(shop, spec);
                             continue;
                         }
                         // Eigene IDs duerfen nie mit Vanilla kollidieren.
@@ -326,15 +330,14 @@ namespace GregMod.Backplanes
                         }
                         var baseItem = FindBaseShopItem(shop, spec);
                         if (baseItem == null) continue;
-                        int baseId = 0;
-                        try { baseId = baseItem.shopItemSO != null ? baseItem.shopItemSO.itemID : 0; } catch { }
+                        int baseId = ReadBaseItemId(baseItem);
                         var clone = CloneShopItemForVariant(shop, baseItem, spec);
                         if (clone != null && AppendShopItem(shop, clone))
                         {
                             _registeredIds.Add(spec.VariantId);
                             _variantToBaseId[spec.VariantItemId] = baseId;
                             added++;
-                            Log.Info($"Registered shop item {spec.VariantDisplayName}.");
+                            Log.Info($"Registered shop item {spec.VariantDisplayName} (baseId={baseId}).");
                         }
                     }
                     if (added > 0)
@@ -365,6 +368,32 @@ namespace GregMod.Backplanes
             }
             catch { }
             return false;
+        }
+
+        private static int ReadBaseItemId(ShopItem baseItem)
+        {
+            try { return baseItem != null && baseItem.shopItemSO != null ? baseItem.shopItemSO.itemID : 0; }
+            catch { return 0; }
+        }
+
+        /// <summary>Stellt sicher, dass die Varianten-ID eine Base-ID hat, auch wenn
+        /// die Karte schon existiert (ShopContainsVariant-Early-Path nach Reset).</summary>
+        private void EnsureBaseIdMapping(ComputerShop shop, ServerVariantSpec spec)
+        {
+            try
+            {
+                if (_variantToBaseId.ContainsKey(spec.VariantItemId)) return;
+                var baseItem = FindBaseShopItem(shop, spec);
+                if (baseItem == null) return;
+                int baseId = ReadBaseItemId(baseItem);
+                _variantToBaseId[spec.VariantItemId] = baseId;
+                if (ModConfig.VerboseLogging)
+                    Log.Info($"Repaired base-id map for {spec.VariantDisplayName}: baseId={baseId}.");
+            }
+            catch (Exception ex)
+            {
+                Log.Warning($"EnsureBaseIdMapping failed for {spec.VariantDisplayName}: {ex.Message}");
+            }
         }
 
         // Vanilla-Shop-Reihen zeigen nur ~5 Karten (Rest wird geclippt).
@@ -410,6 +439,8 @@ namespace GregMod.Backplanes
 
                 if (buttons.Count == 0) return;
 
+                SweepStaleOverflowRows(root);
+
                 foreach (var rowId in familyRows)
                 {
                     try { ReflowFamilyRow(root, rowId); }
@@ -443,6 +474,76 @@ namespace GregMod.Backplanes
             {
                 Log.Warning($"ReflowShopRows failed: {ex.GetBaseException().Message}");
             }
+        }
+
+        private static GameObject FindInactiveOverflowRow(Transform root, string ovName)
+        {
+            try
+            {
+                if (root == null || string.IsNullOrEmpty(ovName)) return null;
+                foreach (Transform child in root)
+                {
+                    if (child == null) continue;
+                    string nm = "";
+                    try { nm = child.gameObject != null ? child.gameObject.name ?? "" : ""; } catch { continue; }
+                    if (!string.Equals(nm, ovName, StringComparison.Ordinal)) continue;
+                    bool active = true;
+                    try { active = child.gameObject.activeInHierarchy; } catch { continue; }
+                    if (!active)
+                    {
+                        try { return child.gameObject; } catch { return null; }
+                    }
+
+                    return null;
+                }
+            }
+            catch { }
+            return null;
+        }
+
+        // Verwaiste Leer-Reihen (keine ShopItem-Kinder, z.B. nach fehlgeschlagenem
+        // Destroy) entfernen, sonst steht eine leere Reihe im Shop.
+        private static void SweepStaleOverflowRows(Transform root)
+        {
+            try
+            {
+                if (root == null) return;
+                var doomed = new System.Collections.Generic.List<GameObject>();
+                foreach (Transform child in root)
+                {
+                    if (child == null) continue;
+                    string nm = "";
+                    try { nm = child.gameObject != null ? child.gameObject.name ?? "" : ""; } catch { continue; }
+                    if (nm.IndexOf(OverflowSuffix, StringComparison.Ordinal) < 0) continue;
+                    bool hasCard = false;
+                    try
+                    {
+                        foreach (Transform k in child)
+                        {
+                            if (k == null) continue;
+                            ShopItem si = null;
+                            try { si = k.gameObject != null ? k.gameObject.GetComponent<ShopItem>() : null; }
+                            catch { }
+                            if (si != null) { hasCard = true; break; }
+                        }
+                    }
+                    catch { }
+                    if (!hasCard)
+                    {
+                        try { doomed.Add(child.gameObject); } catch { }
+                    }
+                }
+
+                foreach (var go in doomed)
+                {
+                    try { go.SetActive(false); } catch { }
+                    try { UnityEngine.Object.Destroy(go); } catch { }
+                }
+
+                if (doomed.Count > 0 && ModConfig.VerboseLogging)
+                    Log.Info($"Reflow: {doomed.Count} verwaiste Leer-Reihe(n) entfernt.");
+            }
+            catch { }
         }
 
         private static void ReflowFamilyRow(Transform root, int rowId)
@@ -482,6 +583,9 @@ namespace GregMod.Backplanes
             {
                 try
                 {
+                    // Sofort unsichtbar (Destroy wirkt erst am Frame-Ende;
+                    // schlägt es fehl, bleibt sonst eine leere Reihe stehen).
+                    try { ov.gameObject.SetActive(false); } catch { }
                     var kids = new System.Collections.Generic.List<Transform>();
                     foreach (Transform k in ov) { if (k != null) kids.Add(k); }
                     foreach (var k in kids)
@@ -520,15 +624,20 @@ namespace GregMod.Backplanes
 
             if (cards.Count <= MaxCardsPerRow) return;
 
-            // 3) Chunks ab dem zweiten in geklonte Overflow-Reihen.
+            // 3) Chunks ab dem zweiten in Overflow-Reihen (vorhandene
+            // inaktive wiederverwenden statt neu anzulegen).
             int overflowIdx = 0;
             for (int i = MaxCardsPerRow; i < cards.Count; i += MaxCardsPerRow)
             {
                 overflowIdx++;
-                GameObject ovGo = null;
-                try { ovGo = UnityEngine.Object.Instantiate(row.gameObject, row.parent, false); }
-                catch { continue; }
-                if (ovGo == null) continue;
+                string ovName = rowName + OverflowSuffix + (overflowIdx > 1 ? " " + overflowIdx : "");
+                GameObject ovGo = FindInactiveOverflowRow(root, ovName);
+                if (ovGo == null)
+                {
+                    try { ovGo = UnityEngine.Object.Instantiate(row.gameObject, row.parent, false); }
+                    catch { continue; }
+                    if (ovGo == null) continue;
+                }
                 try { ovGo.name = rowName + OverflowSuffix + (overflowIdx > 1 ? " " + overflowIdx : ""); } catch { }
                 try
                 {
@@ -560,12 +669,14 @@ namespace GregMod.Backplanes
                 Log.Info($"Reflow '{rowName}': {cards.Count} Karten -> {1 + overflowIdx} Reihen.");
         }
 
-        /// <summary>Loest eine Varianten-ItemID auf die Base-ID auf (Prefab-Routing).</summary>
+        /// <summary>Loest eine Varianten-ItemID auf die Base-ID auf (Prefab-Routing).
+        /// Base-IDs duerfen 0 sein (SystemX vanilla itemID=0) - nur das Fehlen
+        /// des Keys ist ein Fehlschlag.</summary>
         internal bool TryGetBaseId(int variantItemId, out int baseItemId)
         {
             try
             {
-                if (_variantToBaseId.TryGetValue(variantItemId, out baseItemId) && baseItemId != 0)
+                if (_variantToBaseId.TryGetValue(variantItemId, out baseItemId))
                     return true;
             }
             catch { }

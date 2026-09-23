@@ -12,6 +12,17 @@ Format: [Keep a Changelog](https://keepachangelog.com/de/1.0.0/).
 
 - Vanilla-Shop zeigt nur ~5 Karten pro Reihe: Overflow-Reflow verteilt aktive Karten auf 5er-Chunks in geklonten Overflow-Reihen (idempotent, mit Layout-Rebuild).
 
+## [2.2.2] — 2026-09-23
+
+### Fixed
+
+- **Boosted-Server spawnen nicht (stiller Fehlschlag):** `TryGetBaseId` wies
+  Base-IDs mit Wert `0` ab — Vanilla-SystemX hat `itemID=0`, die Map hielt
+  `9001 → 0`, das Prefab-Routing griff nie und `GetPrefabForItem` lieferte
+  null (kaufbar, aber kein physisches Item). Zusätzlich: Karten, die schon
+  via `ShopContainsVariant` registriert waren, füllten die Base-ID-Map nach
+  `ResetForScene` nicht mehr nach.
+
 ## [2.2.1] — 2026-09-23
 
 ### Fixed

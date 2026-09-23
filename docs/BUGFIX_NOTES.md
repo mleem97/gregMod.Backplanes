@@ -1,5 +1,27 @@
 # BUGFIX_NOTES — v1.x reports → v2.x fixes
 
+## v2.2.2 — Boosted-Server spawnen nicht (Playtest, 2026-09-23)
+
+**Symptom:** Karte kaufbar (`Buy: id=9001 … Tracked purchase`), Cart voll,
+`SpawnAllPurchasedItems` läuft durch — aber **kein** `SpawnPhysicalItem`,
+`spawnedItems` bleibt `count=0`. Vanilla-Käufe (`id=0`/`id=2`) spawnen normal.
+
+**Root cause:** `CatalogInjector.TryGetBaseId` verlangte `baseItemId != 0`.
+Vanilla-SystemX-Shopkarte hat `itemID=0` (`Buy: id=0 … name='System X 3U …'`),
+die Map hielt also `9001 → 0`. Der Check verhinderte das Remap in
+`GetPrefabForItemPrefix` → Original suchte itemID 9001 → null → Spawn übersprungen.
+
+Zweite Lücke: `ShopContainsVariant`-Early-Path markierte die Karte nur als
+registriert, ohne die Base-ID-Map nach `ResetForScene` neu zu füllen — nach
+Scene-Wechsel fehlte das Routing auch bei korrekter Karte.
+
+**Fix:**
+- `TryGetBaseId`: Erfolg = Key vorhanden (0 ist gültige Base-ID).
+- `EnsureBaseIdMapping` beim Already-Registered-Pfad; Registrierungslog mit `baseId=`.
+- Warnung in `GetPrefabForItemPrefix`, wenn 9001–9021 ohne Base-ID durchlaufen.
+
+---
+
 ## v2.2.0 — Variant matrix × MoreModules (2026-09-23)
 
 Feature release: four families × five bandwidth tiers (100K/25G · 500K/40G ·
