@@ -6,6 +6,7 @@ using Il2Cpp;
 using Il2CppInterop.Runtime.InteropTypes.Arrays;
 using MelonLoader;
 using UnityEngine;
+using UnityEngine.UI;
 
 namespace GregMod.Backplanes
 {
@@ -340,6 +341,7 @@ namespace GregMod.Backplanes
                         Log.Info($"Shop registration from {source}: +{added} variant(s), {_registeredIds.Count}/{ServerVariantSpec.All.Length} ready.");
                 }
                 RefreshVariantCardTexts(source, shop);
+                ReflowShopRows(shop);
             }
             catch (Exception ex)
             {
@@ -363,6 +365,199 @@ namespace GregMod.Backplanes
             }
             catch { }
             return false;
+        }
+
+        // Vanilla-Shop-Reihen zeigen nur ~5 Karten (Rest wird geclippt).
+        // Reflow: aktive ShopItem-Kinder in 5er-Chunks auf Overflow-Reihen
+        // verteilen (Reihe klonen, Kinder umhängen). Idempotent: zuerst alte
+        // Overflow-Reihen zurückmergen, dann neu chunken.
+        private const int MaxCardsPerRow = 5;
+        private const string OverflowSuffix = " Overflow";
+
+        private static void ReflowShopRows(ComputerShop shop)
+        {
+            try
+            {
+                Transform root = null;
+                try
+                {
+                    if (shop == null || shop.shopItemParent == null) return;
+                    root = shop.shopItemParent.transform;
+                    if (root == null) return;
+                }
+                catch { return; }
+
+                // Familien-Reihen = Parents unserer Buttons.
+                var familyRows = new System.Collections.Generic.HashSet<int>();
+                var buttons = new System.Collections.Generic.List<ShopItem>();
+                ShopItem[] all = null;
+                try { all = root.GetComponentsInChildren<ShopItem>(true); } catch { all = null; }
+                if (all == null) return;
+                foreach (var si in all)
+                {
+                    if (si == null) continue;
+                    string nm = "";
+                    try { nm = si.gameObject != null ? si.gameObject.name ?? "" : ""; } catch { continue; }
+                    if (nm.IndexOf("greg_backplanes_", StringComparison.OrdinalIgnoreCase) < 0) continue;
+                    try { buttons.Add(si); } catch { }
+                    try
+                    {
+                        var p = si.transform != null ? si.transform.parent : null;
+                        if (p != null) familyRows.Add(p.GetInstanceID());
+                    }
+                    catch { }
+                }
+
+                if (buttons.Count == 0) return;
+
+                foreach (var rowId in familyRows)
+                {
+                    try { ReflowFamilyRow(root, rowId); }
+                    catch (Exception ex)
+                    {
+                        if (ModConfig.VerboseLogging)
+                            Log.Info($"Reflow row failed: {ex.GetBaseException().Message}");
+                    }
+                }
+
+                // Layout neu aufbauen (Content wächst durch neue Reihen).
+                try
+                {
+                    Transform content = root;
+                    for (int i = 0; i < 4 && content != null; i++)
+                    {
+                        try
+                        {
+                            var rt = content.GetComponent<RectTransform>();
+                            if (rt != null)
+                                LayoutRebuilder.ForceRebuildLayoutImmediate(rt);
+                        }
+                        catch { }
+                        try { content = content.parent; } catch { content = null; }
+                    }
+                    try { Canvas.ForceUpdateCanvases(); } catch { }
+                }
+                catch { }
+            }
+            catch (Exception ex)
+            {
+                Log.Warning($"ReflowShopRows failed: {ex.GetBaseException().Message}");
+            }
+        }
+
+        private static void ReflowFamilyRow(Transform root, int rowId)
+        {
+            Transform row = null;
+            try
+            {
+                foreach (Transform child in root)
+                {
+                    if (child == null) continue;
+                    try { if (child.GetInstanceID() == rowId) { row = child; break; } } catch { }
+                }
+            }
+            catch { }
+            if (row == null) return;
+
+            string rowName = "";
+            try { rowName = row.gameObject != null ? row.gameObject.name ?? "" : ""; } catch { }
+            if (rowName.EndsWith(OverflowSuffix, StringComparison.Ordinal)) return;
+
+            // 1) Alte Overflow-Reihen dieser Familie zurückmergen + löschen.
+            var overflowRows = new System.Collections.Generic.List<Transform>();
+            try
+            {
+                foreach (Transform sibling in row.parent)
+                {
+                    if (sibling == null || sibling == row) continue;
+                    string nm = "";
+                    try { nm = sibling.gameObject != null ? sibling.gameObject.name ?? "" : ""; } catch { continue; }
+                    if (nm == rowName + OverflowSuffix || nm.StartsWith(rowName + OverflowSuffix + " ",
+                        StringComparison.Ordinal)) overflowRows.Add(sibling);
+                }
+            }
+            catch { }
+
+            foreach (var ov in overflowRows)
+            {
+                try
+                {
+                    var kids = new System.Collections.Generic.List<Transform>();
+                    foreach (Transform k in ov) { if (k != null) kids.Add(k); }
+                    foreach (var k in kids)
+                    {
+                        try { k.SetParent(row, false); } catch { }
+                    }
+                }
+                catch { }
+                try { UnityEngine.Object.Destroy(ov.gameObject); } catch { }
+            }
+
+            // 2) Aktive ShopItem-Kinder in Original-Reihenfolge sammeln.
+            var cards = new System.Collections.Generic.List<Transform>();
+            try
+            {
+                foreach (Transform k in row)
+                {
+                    if (k == null) continue;
+                    ShopItem si = null;
+                    try { si = k.gameObject != null ? k.gameObject.GetComponent<ShopItem>() : null; } catch { }
+                    if (si == null) continue;
+                    bool active = false;
+                    try { active = k.gameObject.activeInHierarchy; } catch { }
+                    if (active) cards.Add(k);
+                }
+            }
+            catch { }
+
+            cards.Sort((a, b) =>
+            {
+                int ia = 0, ib = 0;
+                try { ia = a.GetSiblingIndex(); } catch { }
+                try { ib = b.GetSiblingIndex(); } catch { }
+                return ia.CompareTo(ib);
+            });
+
+            if (cards.Count <= MaxCardsPerRow) return;
+
+            // 3) Chunks ab dem zweiten in geklonte Overflow-Reihen.
+            int overflowIdx = 0;
+            for (int i = MaxCardsPerRow; i < cards.Count; i += MaxCardsPerRow)
+            {
+                overflowIdx++;
+                GameObject ovGo = null;
+                try { ovGo = UnityEngine.Object.Instantiate(row.gameObject, row.parent, false); }
+                catch { continue; }
+                if (ovGo == null) continue;
+                try { ovGo.name = rowName + OverflowSuffix + (overflowIdx > 1 ? " " + overflowIdx : ""); } catch { }
+                try
+                {
+                    var stale = new System.Collections.Generic.List<Transform>();
+                    foreach (Transform k in ovGo.transform) { if (k != null) stale.Add(k); }
+                    foreach (var k in stale)
+                    {
+                        try { UnityEngine.Object.Destroy(k.gameObject); } catch { }
+                    }
+                }
+                catch { }
+
+                int end = Math.Min(i + MaxCardsPerRow, cards.Count);
+                for (int j = i; j < end; j++)
+                {
+                    try { cards[j].SetParent(ovGo.transform, false); } catch { }
+                }
+
+                try
+                {
+                    int sib = row.GetSiblingIndex() + overflowIdx;
+                    ovGo.transform.SetSiblingIndex(sib);
+                    ovGo.SetActive(true);
+                }
+                catch { }
+            }
+
+            if (ModConfig.VerboseLogging)
+                Log.Info($"Reflow '{rowName}': {cards.Count} Karten -> {1 + overflowIdx} Reihen.");
         }
 
         /// <summary>Loest eine Varianten-ItemID auf die Base-ID auf (Prefab-Routing).</summary>

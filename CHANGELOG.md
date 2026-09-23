@@ -8,6 +8,10 @@ Format: [Keep a Changelog](https://keepachangelog.com/de/1.0.0/).
 
 - **Titan 40M IOPS** (ID 9021): Custom-Server mit 4 TBit pro Port (beide Ports, Redundanz inklusive), RGB-Streifen (Hue rotiert, ~8 s) statt statischem Tint.
 
+### Fixed
+
+- Vanilla-Shop zeigt nur ~5 Karten pro Reihe: Overflow-Reflow verteilt aktive Karten auf 5er-Chunks in geklonten Overflow-Reihen (idempotent, mit Layout-Rebuild).
+
 ## [2.2.1] — 2026-09-23
 
 ### Fixed
