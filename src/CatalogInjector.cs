@@ -1242,10 +1242,109 @@ namespace GregMod.Backplanes
                         RepairGuard.Exit(ptr);
                     }
                 }
+
+                AuditVanillaPortSpeeds(snapshot);
             }
             catch (Exception ex)
             {
                 Log.Warning($"Watchlist-Tick fehlgeschlagen: {ex.Message}");
+            }
+        }
+
+        // IOPS -> Gbps-Leiter (wie Varianten-Tiers). Unter 100k: -1 = Vanilla lassen.
+        internal static float VanillaTierGbps(float maxProcessingSpeed)
+        {
+            float iops = maxProcessingSpeed * 100000f;
+            if (iops >= 40000000f) return 4000f;
+            if (iops >= 4000000f) return 400f;
+            if (iops >= 2000000f) return 200f;
+            if (iops >= 1000000f) return 100f;
+            if (iops >= 500000f) return 40f;
+            if (iops >= 100000f) return 25f;
+            return -1f;
+        }
+
+        private static DateTime _lastVanillaAuditAt = DateTime.MinValue;
+
+        /// <summary>
+        /// Alle NICHT-Varianten-Server: freie Ports auf Tier-Speed heben
+        /// (Vanilla lässt sie bei 0.2 = 1 Gbps). Nur Speed, keine Flags/Typen.
+        /// Belegte Ports (Kabel/Modul) werden nie angefasst. Alle 30 s.
+        /// </summary>
+        private static void AuditVanillaPortSpeeds(
+            List<(IntPtr ptr, Server server, ServerVariantSpec spec)> watched)
+        {
+            try
+            {
+                if (DateTime.UtcNow - _lastVanillaAuditAt < TimeSpan.FromSeconds(30.0)) return;
+                _lastVanillaAuditAt = DateTime.UtcNow;
+
+                var watchedPtrs = new HashSet<IntPtr>();
+                if (watched != null)
+                    foreach (var (ptr, _, _) in watched)
+                    {
+                        if (ptr != IntPtr.Zero) watchedPtrs.Add(ptr);
+                    }
+
+                Server[] all = null;
+                try { all = Resources.FindObjectsOfTypeAll<Server>(); }
+                catch { return; }
+                if (all == null) return;
+
+                int fixedPorts = 0, servers = 0;
+                foreach (var server in all)
+                {
+                    if (server == null) continue;
+                    IntPtr ptr = IntPtr.Zero;
+                    try { ptr = server.Pointer; } catch { continue; }
+                    if (ptr == IntPtr.Zero || watchedPtrs.Contains(ptr)) continue;
+                    float max = 0f;
+                    try { max = server.maxProcessingSpeed; } catch { continue; }
+                    if (max <= 0f) continue;
+                    float gbps = VanillaTierGbps(max);
+                    if (gbps < 0f) continue;
+                    float target = gbps / 5f;
+
+                    List<CableLink> links = null;
+                    try { links = CollectServerLinks(server); } catch { continue; }
+                    if (links == null) continue;
+                    bool touched = false;
+                    foreach (var link in links)
+                    {
+                        if (link == null) continue;
+                        try
+                        {
+                            if (link.cableIDsOnLink != 0 || link.insertedSFP != null) continue;
+                        }
+                        catch { continue; }
+
+                        float live = 0f;
+                        try { live = link.connectionSpeed; } catch { continue; }
+                        if (Approx(live, target)) continue;
+                        try { link.SetConnectionSpeed(target); } catch { /* best-effort */ }
+                        try
+                        {
+                            if (!Approx(link.connectionSpeed, target))
+                                link.connectionSpeed = target;
+                        }
+                        catch { /* best-effort */ }
+                        touched = true;
+                        fixedPorts++;
+                    }
+
+                    if (touched)
+                    {
+                        servers++;
+                        try { ForceServerDisplayRefresh(server); } catch { }
+                    }
+                }
+
+                if (fixedPorts > 0)
+                    Log.Info($"Vanilla-Port-Audit: {fixedPorts} Port(s) an {servers} Server(n) auf Tier-Speed gehoben.");
+            }
+            catch (Exception ex)
+            {
+                Log.Warning($"Vanilla-Port-Audit fehlgeschlagen: {ex.Message}");
             }
         }
 
