@@ -452,7 +452,11 @@ namespace GregMod.Backplanes
                     catch { }
                 }
 
-                if (buttons == 0) return;
+                if (buttons == 0)
+                {
+                    Log.Info("Reflow: keine Backplanes-Buttons gefunden (Shop-UI evtl. noch nicht aufgebaut).");
+                    return;
+                }
 
                 // Reihen direkt einsammeln (kein shop.shopItemParent nötig).
                 var rowsById = new System.Collections.Generic.Dictionary<int, Transform>();
@@ -497,6 +501,8 @@ namespace GregMod.Backplanes
                             Log.Info($"Reflow row failed: {ex.GetBaseException().Message}");
                     }
                 }
+
+                Log.Info($"Reflow: {buttons} Buttons in {rowsById.Count} Reihen verarbeitet.");
 
                 // Layout neu aufbauen: Content per Name suchen, Fallback 4 Ebenen.
                 try
@@ -706,7 +712,11 @@ namespace GregMod.Backplanes
                 return ia.CompareTo(ib);
             });
 
-            if (cards.Count <= MaxCardsPerRow) return;
+            if (cards.Count <= MaxCardsPerRow)
+            {
+                Log.Info($"Reflow '{rowName}': {cards.Count} aktive Karten, kein Umbruch nötig.");
+                return;
+            }
 
             // 3) Chunks ab dem zweiten in Overflow-Reihen (vorhandene
             // inaktive wiederverwenden statt neu anzulegen).
