@@ -21,6 +21,8 @@ Format: [Keep a Changelog](https://keepachangelog.com/de/1.0.0/).
 ### Added
 
 - **Titan 40M IOPS** (ID 9021): Custom-Server mit 4 TBit pro Port (beide Ports, Redundanz inklusive), RGB-Streifen (Hue rotiert, ~8 s) statt statischem Tint.
+- **40M-Tier für SystemX/RISC/Mainframe** (IDs 9022–9024, statische Tints).
+- **Vanilla-Port-Audit**: freie Ports aller Nicht-Varianten-Server werden auf Tier-Speed gehoben (IOPS-Leiter, belegte Ports unangetastet, alle 30 s).
 
 ### Fixed
 
