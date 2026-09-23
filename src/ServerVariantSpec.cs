@@ -172,6 +172,10 @@ namespace GregMod.Backplanes
                 "System X 7U 12000 IOPS", "ShopItemSO_Server_Yellow2", "SystemX",
                 4000000, 1000000, 200000, 9011, "QSFP-DD", 400f, 3, 4, "QSFP-DD 400G",
                 new Color(1.00f, 0.90f, 0.40f, 1f), yellow, small: false));
+            list.Add(Make("systemx", "System X 3U 5000 IOPS", "ShopItemSO_Server_Yellow1",
+                "System X 7U 12000 IOPS", "ShopItemSO_Server_Yellow2", "SystemX",
+                40000000, 10000000, 2000000, 9022, "QSFP-DD", 4000f, 3, 4, null,
+                new Color(1.00f, 0.95f, 0.55f, 1f), yellow, small: false));
 
             // ---- RISC
             list.Add(Make("risc", "RISC 3U 5000 IOPS", "ShopItemSO_Server_Blue1",
@@ -194,6 +198,10 @@ namespace GregMod.Backplanes
                 "RISC 7U 12000 IOPS", "ShopItemSO_Server_Blue2", "RISC",
                 4000000, 1000000, 200000, 9014, "QSFP-DD", 400f, 3, 4, "QSFP-DD 400G",
                 new Color(0.85f, 0.65f, 1.00f, 1f), blue, small: false));
+            list.Add(Make("risc", "RISC 3U 5000 IOPS", "ShopItemSO_Server_Blue1",
+                "RISC 7U 12000 IOPS", "ShopItemSO_Server_Blue2", "RISC",
+                40000000, 10000000, 2000000, 9023, "QSFP-DD", 4000f, 3, 4, null,
+                new Color(0.90f, 0.75f, 1.00f, 1f), blue, small: false));
 
             // ---- Mainframe
             list.Add(Make("mainframe", "Mainframe 3U 5000 IOPs", "ShopItemSO_Server_Purple1",
@@ -216,6 +224,10 @@ namespace GregMod.Backplanes
                 "Mainframe 7U 12000 IOPs", "ShopItemSO_Server_Purple2", "Mainframe",
                 4000000, 1000000, 200000, 9017, "QSFP-DD", 400f, 3, 4, "QSFP-DD 400G",
                 new Color(1.00f, 0.60f, 0.60f, 1f), purple, small: false));
+            list.Add(Make("mainframe", "Mainframe 3U 5000 IOPs", "ShopItemSO_Server_Purple1",
+                "Mainframe 7U 12000 IOPs", "ShopItemSO_Server_Purple2", "Mainframe",
+                40000000, 10000000, 2000000, 9024, "QSFP-DD", 4000f, 3, 4, null,
+                new Color(1.00f, 0.70f, 0.70f, 1f), purple, small: false));
 
             // ---- GPU
             list.Add(Make("gpu", "GPU 3U 5000 IOPS", "ShopItemSO_Server_Green1",
