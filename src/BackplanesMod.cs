@@ -4,7 +4,7 @@ using MelonLoader;
 using UnityEngine;
 using UnityEngine.InputSystem;
 
-[assembly: MelonInfo(typeof(GregMod.Backplanes.BackplanesMod), "gregMod.Backplanes", "2.2.2", "TeamGreg Modding")]
+[assembly: MelonInfo(typeof(GregMod.Backplanes.BackplanesMod), "gregMod.Backplanes", "2.2.3", "TeamGreg Modding")]
 [assembly: MelonGame("Waseku", "Data Center")]
 
 namespace GregMod.Backplanes
@@ -67,7 +67,7 @@ namespace GregMod.Backplanes
     }
 
     /// <summary>
-    /// gregMod.Backplanes v2.2.2 — refactored successor of BackplaneBoostServers v1.0.1.
+    /// gregMod.Backplanes v2.2.3 — refactored successor of BackplaneBoostServers v1.0.1.
     ///
     /// 20 high-IOPS backplane server variants (SystemX / RISC / Mainframe / GPU ×
     /// 100K/500K/1M/2M/4M) with bandwidth tiers aligned to gregMod.MoreModules
@@ -88,7 +88,7 @@ namespace GregMod.Backplanes
             {
                 Instance = this;
                 ModConfig.Load();
-                Log.Info("Initializing gregMod.Backplanes v2.2.2 (refactored from BackplaneBoostServers v1.0.1).");
+                Log.Info("Initializing gregMod.Backplanes v2.2.3 (refactored from BackplaneBoostServers v1.0.1).");
                 Log.Info($"Press {ModConfig.ToggleKey} for the Backplanes panel.");
                 Patches.Apply(HarmonyInstance);
                 if (GregHost.HasCore)
@@ -229,13 +229,22 @@ namespace GregMod.Backplanes
             try
             {
                 gregCore.Core.Mods.GregModRegistry.Register(
-                    "gregMod.Backplanes", "Backplanes", "2.2.2",
+                    "gregMod.Backplanes", "Backplanes", "2.2.3",
                     new string[] { "backplanes" });
             }
             catch (Exception ex)
             {
                 Log.Warning("Mod registration failed: " + ex.GetBaseException().Message);
             }
+        }
+
+        // Spieler-sichtbare Warnung via gregCore (z.B. Checkout-Verify bei
+        // Bulk-Kaeufen). Nur bei HasCore aufrufen (eigene Methode wegen
+        // JIT-Trennung ohne gregCore-DLL).
+        internal static void NotifyCore(string message)
+        {
+            try { gregCore.UI.GregNotificationManager.Show(message, 5f); }
+            catch (Exception ex) { Log.Warning("NotifyCore failed: " + ex.GetBaseException().Message); }
         }
 
         // Tasten-HUD (rechter Rand) + Oeffner fuers F1-Hub. Nur mit gregCore

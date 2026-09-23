@@ -4,6 +4,20 @@ Format: [Keep a Changelog](https://keepachangelog.com/de/1.0.0/).
 
 ## [Unreleased]
 
+## [2.2.3] — 2026-09-23
+
+### Fixed
+
+- **Bulk-Käufe (30+ Units, gemischte Preispunkte):** Spawn-Zuordnung läuft
+  jetzt über einen Checkout-Snapshot (eine Spec pro Unit in Cart-Reihenfolge,
+  qty expandiert) statt Preis-Peek — alle 30 Spawns bekommen die exakte Spec,
+  auch bei gemischten Familien zum selben Preis. Familien-Check am Prefab
+  korrigiert Cart-Order-Drift via Preis-Peek.
+- **Pending-Cap 12 → 200** (LargerCart-Kontext): Bulk-Käufe verdrängen keine
+  Einträge mehr; Expiry (10 min) räumt weiter auf.
+- **Post-Checkout-Verify:** konfigurierte vs. erwartete Units — bei Abweichung
+  Warnung im Log **und** sichtbare gregCore-Notification (`NotifyCore`).
+
 ### Added
 
 - **Titan 40M IOPS** (ID 9021): Custom-Server mit 4 TBit pro Port (beide Ports, Redundanz inklusive), RGB-Streifen (Hue rotiert, ~8 s) statt statischem Tint.

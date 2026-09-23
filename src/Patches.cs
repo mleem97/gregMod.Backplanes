@@ -286,6 +286,7 @@ namespace GregMod.Backplanes
             {
                 if (__instance == null) return;
                 Log.Info($"[Color] SpawnAllPurchasedItems: BEGIN uniqueID={__instance.uniqueID}");
+                BackplanesMod.Injector.BeginCheckoutSnapshot(__instance);
                 DumpColorState(__instance);
                 DumpSpawnedItems(__instance, "before spawn-all");
 
@@ -351,6 +352,7 @@ namespace GregMod.Backplanes
                     ForceApplyColorToUid(__instance, uid, _checkoutColors[i], _checkoutTypes[i]);
                 }
                 Log.Info($"[Color] checkout sweep done: {colored}/{_checkoutColors.Count} already colored, spawns={spawned}");
+                BackplanesMod.Injector.VerifyCheckout("ComputerShop.SpawnAllPurchasedItems");
             }
             catch (Exception ex) { Log.Warning("SpawnAllPostfix failed: " + ex.Message); }
             finally

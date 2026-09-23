@@ -1,5 +1,15 @@
 # Changelog
 
+## v2.2.3
+
+- **Bulk purchases (30+ units, mixed families at the same price):** spawn
+  assignment now uses a checkout snapshot (one spec per unit in cart order,
+  qty expanded) instead of price-peeking — every spawn gets its exact spec.
+  Prefab family check corrects cart-order drift via price-peek.
+- **Pending cap 12 → 200** (LargerCart context); 10-minute expiry still prunes.
+- **Post-checkout verify:** configured vs. expected units — mismatch warns in
+  the log **and** via visible gregCore notification.
+
 ## v2.2.2
 
 - **Boosted servers silently failed to spawn (playtest):** `TryGetBaseId` rejected

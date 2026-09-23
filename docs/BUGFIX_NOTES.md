@@ -1,5 +1,24 @@
 # BUGFIX_NOTES — v1.x reports → v2.x fixes
 
+## v2.2.3 — Bulk-Käufe: falsche Spec bei gemischten Preispunkten (2026-09-23)
+
+**Symptom:** 30 Units auf einmal (LargerCart), z.B. 15× SystemX 100K + 15×
+RISC 100K (beide 20K) — alle Spawns bekamen die Spec des ersten Queue-Eintrags
+(`PeekPendingSpecForSpawn` matcht nur nach Preis). Zusätzlich warf der
+Pending-Cap (12) ab dem 13. Klick die ältesten Einträge weg.
+
+**Root cause:** Preis ist kein eindeutiger Key (4 Familien × 5 Stufen teilen
+5 Preise); Queue-Cap für Single-Käufe dimensioniert.
+
+**Fix:**
+- `BeginCheckoutSnapshot` im `SpawnAll`-Prefix: Spec pro Unit in
+  Cart-Reihenfolge; `ConsumeCheckoutSpec` pro `SpawnPhysicalItem`.
+- `GoMatchesSpecFamily` am Prefab: bei Cart-Order-Drift Korrektur via Preis-Peek.
+- Pending-Cap 12 → 200; `VerifyCheckout` + `NotifyCore` (gregCore-Toast) bei
+  konfiguriert ≠ erwartet.
+
+---
+
 ## v2.2.2 — Boosted-Server spawnen nicht (Playtest, 2026-09-23)
 
 **Symptom:** Karte kaufbar (`Buy: id=9001 … Tracked purchase`), Cart voll,

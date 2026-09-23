@@ -55,6 +55,15 @@ namespace GregMod.Backplanes
         // Pending purchases awaiting rack insertion (bounded, expiring).
         private readonly Queue<PendingInsertion> _pendingInsertions = new Queue<PendingInsertion>();
 
+        // Checkout-Snapshot: exakte Spec pro Unit in Cart-Reihenfolge.
+        // Ueberlebt Bulk-Kaeufe (30+ Units, gemischte Preispunkte), wo der
+        // reine Preis-Peek (PeekPendingSpecForSpawn) mehrdeutig waere.
+        // Wird im SpawnAll-Prefix aufgebaut und pro SpawnPhysicalItem
+        // genau einmal konsumiert; VerifyCheckout meldet Abweichungen.
+        private readonly Queue<ServerVariantSpec> _checkoutSpecQueue = new Queue<ServerVariantSpec>();
+        private int _checkoutExpectedUnits;
+        private int _checkoutVariantSpawned;
+
         // Spawn uid -> spec (correlated via ComputerShop.spawnedItems).
         private readonly Dictionary<int, ServerVariantSpec> _spawnedSpecsByUid = new Dictionary<int, ServerVariantSpec>();
 
@@ -100,6 +109,9 @@ namespace GregMod.Backplanes
             lock (_watched) { _watched.Clear(); }
             _lastWatchAt = DateTime.MinValue;
             _pendingInsertions.Clear();
+            _checkoutSpecQueue.Clear();
+            _checkoutExpectedUnits = 0;
+            _checkoutVariantSpawned = 0;
             _spawnedSpecsByUid.Clear();
             _spawnedUidCreatedAt.Clear();
             _pendingSpecsByPointer.Clear();
@@ -407,28 +419,31 @@ namespace GregMod.Backplanes
         {
             try
             {
-                Transform root = null;
-                try
-                {
-                    if (shop == null || shop.shopItemParent == null) return;
-                    root = shop.shopItemParent.transform;
-                    if (root == null) return;
-                }
-                catch { return; }
-
-                // Familien-Reihen = Parents unserer Buttons.
-                var familyRows = new System.Collections.Generic.HashSet<int>();
-                var buttons = new System.Collections.Generic.List<ShopItem>();
+                // Buttons szenenweit finden — NICHT ueber shop.shopItemParent:
+                // das ist beim Scene-Load-Trigger noch null, waehrend die
+                // Klone (via baseItem.transform.parent) laengst einsortiert
+                // sind. Deshalb lief der Reflow ins Leere (still return).
                 ShopItem[] all = null;
-                try { all = root.GetComponentsInChildren<ShopItem>(true); } catch { all = null; }
+                try { all = Resources.FindObjectsOfTypeAll<ShopItem>(); } catch { return; }
                 if (all == null) return;
+
+                var familyRows = new System.Collections.Generic.HashSet<int>();
+                int buttons = 0;
                 foreach (var si in all)
                 {
                     if (si == null) continue;
                     string nm = "";
-                    try { nm = si.gameObject != null ? si.gameObject.name ?? "" : ""; } catch { continue; }
+                    GameObject go = null;
+                    try { go = si.gameObject; nm = go != null ? go.name ?? "" : ""; }
+                    catch { continue; }
                     if (nm.IndexOf("greg_backplanes_", StringComparison.OrdinalIgnoreCase) < 0) continue;
-                    try { buttons.Add(si); } catch { }
+                    try
+                    {
+                        if (go == null || !go.scene.IsValid() || !go.scene.isLoaded) continue;
+                    }
+                    catch { continue; }
+
+                    buttons++;
                     try
                     {
                         var p = si.transform != null ? si.transform.parent : null;
@@ -437,13 +452,45 @@ namespace GregMod.Backplanes
                     catch { }
                 }
 
-                if (buttons.Count == 0) return;
+                if (buttons == 0) return;
 
-                SweepStaleOverflowRows(root);
-
+                // Reihen direkt einsammeln (kein shop.shopItemParent nötig).
+                var rowsById = new System.Collections.Generic.Dictionary<int, Transform>();
+                var scopes = new System.Collections.Generic.HashSet<int>();
+                var scopeById = new System.Collections.Generic.Dictionary<int, Transform>();
                 foreach (var rowId in familyRows)
                 {
-                    try { ReflowFamilyRow(root, rowId); }
+                    try
+                    {
+                        Transform row = FindRowByInstanceId(rowId);
+                        if (row == null) continue;
+                        rowsById[rowId] = row;
+                        var parent = row.parent;
+                        if (parent == null) continue;
+                        int pid = 0;
+                        try { pid = parent.GetInstanceID(); } catch { continue; }
+                        if (pid == 0 || !scopes.Add(pid)) continue;
+                        scopeById[pid] = parent;
+                    }
+                    catch { }
+                }
+
+                foreach (var kv in scopeById)
+                {
+                    try { SweepStaleOverflowRows(kv.Value); } catch { }
+                }
+
+                foreach (var kv in rowsById)
+                {
+                    Transform scope = null;
+                    try
+                    {
+                        var parent = kv.Value != null ? kv.Value.parent : null;
+                        scope = parent;
+                    }
+                    catch { }
+                    if (scope == null) continue;
+                    try { ReflowFamilyRow(scope, kv.Key); }
                     catch (Exception ex)
                     {
                         if (ModConfig.VerboseLogging)
@@ -451,10 +498,21 @@ namespace GregMod.Backplanes
                     }
                 }
 
-                // Layout neu aufbauen (Content wächst durch neue Reihen).
+                // Layout neu aufbauen: Content per Name suchen, Fallback 4 Ebenen.
                 try
                 {
-                    Transform content = root;
+                    Transform anchor = null;
+                    foreach (var kv in scopeById) { anchor = kv.Value; break; }
+                    Transform content = anchor;
+                    for (int i = 0; i < 6 && content != null; i++)
+                    {
+                        string nm = "";
+                        try { nm = content.gameObject != null ? content.gameObject.name ?? "" : ""; } catch { }
+                        if (nm.IndexOf("Content", StringComparison.OrdinalIgnoreCase) >= 0) break;
+                        try { content = content.parent; } catch { content = null; }
+                    }
+
+                    if (content == null) content = anchor;
                     for (int i = 0; i < 4 && content != null; i++)
                     {
                         try
@@ -474,6 +532,32 @@ namespace GregMod.Backplanes
             {
                 Log.Warning($"ReflowShopRows failed: {ex.GetBaseException().Message}");
             }
+        }
+
+        private static Transform FindRowByInstanceId(int instanceId)
+        {
+            try
+            {
+                ShopItem[] all = Resources.FindObjectsOfTypeAll<ShopItem>();
+                if (all == null) return null;
+                foreach (var si in all)
+                {
+                    if (si == null) continue;
+                    try
+                    {
+                        var t = si.transform;
+                        if (t == null) continue;
+                        var p = t.parent;
+                        if (p != null)
+                        {
+                            try { if (p.GetInstanceID() == instanceId) return p; } catch { }
+                        }
+                    }
+                    catch { }
+                }
+            }
+            catch { }
+            return null;
         }
 
         private static GameObject FindInactiveOverflowRow(Transform root, string ovName)
@@ -874,17 +958,30 @@ namespace GregMod.Backplanes
             try
             {
                 if (!IsServerItemType(itemType)) return;
-                // Peek (kein Konsum): passender Pending-Eintrag fuer den Spawn.
-                // Verbraucht wird erst bei erfolgreicher Insertion
-                // (FinalizeInsertedServer -> RemoveOnePendingSpec).
-                var spec = PeekPendingSpecForSpawn(price);
+                // Exakte Zuordnung zuerst: Checkout-Snapshot in Cart-Reihenfolge
+                // (Bulk-sicher, auch bei gemischten Preispunkten). Preis-Peek
+                // nur als Fallback fuer Spawns ausserhalb eines Checkouts.
+                var spec = PeekCheckoutSpec();
+                GameObject go = null;
+                try { if (shop?.spawnedItems != null) shop.spawnedItems.TryGetValue(uid, out go); } catch { /* best-effort */ }
+                if (spec != null && go != null && !GoMatchesSpecFamily(go, spec))
+                {
+                    var priceSpec = PeekPendingSpecForSpawn(price);
+                    if (priceSpec != null && GoMatchesSpecFamily(go, priceSpec))
+                        spec = priceSpec;
+                    else
+                        Log.Warning($"Spawn uid={uid}: Cart-Reihenfolge weicht ab (erwartet " +
+                            $"{spec.VariantDisplayName}, Prefab '{go.name}') - nutze Snapshot-Spec.");
+                }
+                if (spec == null)
+                    spec = PeekPendingSpecForSpawn(price);
                 if (spec == null) return;
+                ConsumeCheckoutSpec(spec);
+                if (_checkoutExpectedUnits > 0) _checkoutVariantSpawned++;
                 Log.Info($"Spawn ({source}): {spec.VariantDisplayName} uid={uid} - suche physisches Item.");
                 _spawnedSpecsByUid[uid] = spec;
                 RememberSpawnedUid(uid);
 
-                GameObject go = null;
-                try { if (shop?.spawnedItems != null) shop.spawnedItems.TryGetValue(uid, out go); } catch { /* best-effort */ }
                 if (go == null)
                 {
                     Log.Info($"Spawn uid {uid} fuer {spec.VariantDisplayName} noch nicht in spawnedItems; Drain/Insert uebernehmen.");
@@ -1953,7 +2050,12 @@ namespace GregMod.Backplanes
         private void EnqueuePending(ServerVariantSpec spec)
         {
             _pendingInsertions.Enqueue(new PendingInsertion { Spec = spec, CreatedAt = DateTime.UtcNow });
-            while (_pendingInsertions.Count > 12) _pendingInsertions.Dequeue();
+            // Bulk-Kaeufe (LargerCart): 30+ Units duerfen nicht die aeltesten
+            // Eintraege verdrangen. Cap grosszuegig, Expiry (10min) raeumt auf.
+            int dropped = 0;
+            while (_pendingInsertions.Count > 200) { _pendingInsertions.Dequeue(); dropped++; }
+            if (dropped > 0 && ModConfig.VerboseLogging)
+                Log.Info($"Pending-Cap: {dropped} aelteste Eintraege verworfen.");
         }
 
         private ServerVariantSpec PeekPendingSpecForSpawn(int price)
@@ -1977,6 +2079,119 @@ namespace GregMod.Backplanes
         private void RememberSpawnedUid(int uid)
         {
             try { _spawnedUidCreatedAt[uid] = DateTime.UtcNow; } catch { /* best-effort */ }
+        }
+
+        /// <summary>Baut den Checkout-Snapshot: eine Spec pro Unit in
+        /// Cart-Reihenfolge (qty expandiert). Vanilla spawnt in Cart-Order,
+        /// daher korreliert der n-te SpawnPhysicalItem mit dem n-ten Eintrag -
+        /// exakt, auch bei 30+ Units und gemischten Familien zum selben Preis.
+        /// Bei Familien-Mismatch am Prefab greift der Familien-Check in
+        /// ConfigureSpawnedItem (Preis-Peek als Korrektur).</summary>
+        internal void BeginCheckoutSnapshot(ComputerShop shop)
+        {
+            try
+            {
+                _checkoutSpecQueue.Clear();
+                _checkoutExpectedUnits = 0;
+                _checkoutVariantSpawned = 0;
+                var cart = shop?.cartUIItems;
+                if (cart == null) return;
+                for (int i = 0; i < cart.Count; i++)
+                {
+                    var it = cart[i];
+                    if (it == null) continue;
+                    int id = 0;
+                    try { id = it.ItemID; } catch { continue; }
+                    var spec = ServerVariantSpec.FindByVariantItemId(id);
+                    if (spec == null) continue;
+                    int qty = 1;
+                    try { qty = Math.Max(1, it.Quantity); } catch { }
+                    for (int u = 0; u < qty; u++) _checkoutSpecQueue.Enqueue(spec);
+                    _checkoutExpectedUnits += qty;
+                }
+                if (_checkoutExpectedUnits > 0)
+                    Log.Info($"Checkout-Snapshot: {_checkoutExpectedUnits} Boosted-Unit(s) in Cart-Reihenfolge erwartet.");
+            }
+            catch (Exception ex) { Log.Warning("Checkout-Snapshot failed: " + ex.Message); }
+        }
+
+        /// <summary>Post-Checkout-Verify: konfigurierte Varianten-Units vs.
+        /// erwartete Units. Abweichung = Warnung im Log + sichtbare
+        /// gregCore-Notification (Sicherheitsnetz bei Bulk-Kaeufen).</summary>
+        internal void VerifyCheckout(string source)
+        {
+            try
+            {
+                if (_checkoutExpectedUnits == 0) return;
+                if (_checkoutVariantSpawned != _checkoutExpectedUnits)
+                {
+                    string msg = $"Backplanes: {_checkoutVariantSpawned}/{_checkoutExpectedUnits} Boosted-Servern konfiguriert ({source}).";
+                    Log.Warning(msg + " Cart vs. Spawn weicht ab - Log pruefen.");
+                    if (GregHost.HasCore)
+                    {
+                        try { BackplanesMod.NotifyCore(msg); } catch { /* best-effort */ }
+                    }
+                }
+                else if (ModConfig.VerboseLogging)
+                    Log.Info($"Checkout-Verify: {_checkoutVariantSpawned}/{_checkoutExpectedUnits} Boosted-Units konfiguriert.");
+                int leftover = 0;
+                try { leftover = _checkoutSpecQueue.Count; } catch { }
+                if (leftover > 0)
+                {
+                    Log.Warning($"Checkout-Verify: {leftover} Boosted-Spec(s) ohne Spawn uebrig - Prefab-Routing pruefen.");
+                    try { _checkoutSpecQueue.Clear(); } catch { }
+                }
+            }
+            catch (Exception ex) { Log.Warning("Checkout-Verify failed: " + ex.Message); }
+        }
+
+        private ServerVariantSpec PeekCheckoutSpec()
+        {
+            try { return _checkoutSpecQueue.Count > 0 ? _checkoutSpecQueue.Peek() : null; }
+            catch { return null; }
+        }
+
+        private void ConsumeCheckoutSpec(ServerVariantSpec spec)
+        {
+            if (spec == null) return;
+            try
+            {
+                int count = _checkoutSpecQueue.Count;
+                bool removed = false;
+                for (int i = 0; i < count; i++)
+                {
+                    var queued = _checkoutSpecQueue.Dequeue();
+                    if (!removed && queued != null &&
+                        string.Equals(queued.VariantId, spec.VariantId, StringComparison.OrdinalIgnoreCase))
+                        removed = true;
+                    else
+                        _checkoutSpecQueue.Enqueue(queued);
+                }
+            }
+            catch { /* best-effort */ }
+        }
+
+        /// <summary>Prueft, ob das gespawnte Prefab zur Spec-Familie passt
+        /// (BaseRuntimeToken, _-tolerant). Schuetzt vor Cart-Order-Drift.</summary>
+        private static bool GoMatchesSpecFamily(GameObject go, ServerVariantSpec spec)
+        {
+            try
+            {
+                if (go == null || spec == null) return false;
+                string token = spec.BaseRuntimeToken;
+                if (string.IsNullOrEmpty(token)) return false;
+                try { if (NameMatchesBaseToken(go.name ?? "", token)) return true; } catch { }
+                foreach (var server in go.GetComponentsInChildren<Server>(true))
+                {
+                    if (server == null) continue;
+                    string n = "";
+                    try { n = server.gameObject != null ? server.gameObject.name ?? "" : ""; }
+                    catch { continue; }
+                    if (NameMatchesBaseToken(n, token)) return true;
+                }
+                return false;
+            }
+            catch { return true; } // im Zweifel nicht blockieren
         }
 
         private ServerVariantSpec DequeueMatchingPendingSpec(Server server)
