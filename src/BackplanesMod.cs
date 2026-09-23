@@ -22,6 +22,7 @@ namespace GregMod.Backplanes
         internal static MelonPreferences_Entry<bool> PrefServerTint;
         internal static MelonPreferences_Entry<bool> PrefServerScale;
         internal static MelonPreferences_Entry<string> PrefToggleKey;
+        internal static MelonPreferences_Entry<bool> PrefForcePortSpeed;
         internal static Key ToggleKey = Key.F6;
 
         internal static int RepairWindowSeconds => Clamp(PrefRepairWindow?.Value ?? 20, 5, 120);
@@ -29,6 +30,7 @@ namespace GregMod.Backplanes
         internal static bool VerboseLogging => PrefVerboseLogging?.Value ?? false;
         internal static bool ServerTint => PrefServerTint?.Value ?? true;
         internal static bool ServerScale => PrefServerScale?.Value ?? true;
+        internal static bool ForcePortSpeed => PrefForcePortSpeed?.Value ?? false;
 
         internal static void Load()
         {
@@ -45,6 +47,8 @@ namespace GregMod.Backplanes
                     "Recolor boosted servers (orange/violet/red/lime) to tell them apart.");
                 PrefServerScale = category.CreateEntry("ServerScale", true,
                     "Give boosted servers a taller look (4U/8U). Visual only, rack slots unchanged.");
+                PrefForcePortSpeed = category.CreateEntry("ForcePortSpeed", false,
+                    "Set port speed even on busy (cabled) ports. May fight live traffic — use to unstick ports.");
                 PrefToggleKey = category.CreateEntry("ToggleKey", "F6",
                     "Hotkey to open/close the Backplanes panel.");
                 try
@@ -206,6 +210,10 @@ namespace GregMod.Backplanes
                         b.AddToggle("Verbose logging", ModConfig.VerboseLogging, v =>
                         {
                             try { if (ModConfig.PrefVerboseLogging != null) { ModConfig.PrefVerboseLogging.Value = v; MelonPreferences.Save(); } } catch { /* best-effort */ }
+                        });
+                        b.AddToggle("Force port speed (busy ports too)", ModConfig.ForcePortSpeed, v =>
+                        {
+                            try { if (ModConfig.PrefForcePortSpeed != null) { ModConfig.PrefForcePortSpeed.Value = v; MelonPreferences.Save(); } } catch { /* best-effort */ }
                         });
                         b.AddSlider("Repair window (s)", 5f, 120f, ModConfig.RepairWindowSeconds, v =>
                         {

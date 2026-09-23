@@ -1309,14 +1309,19 @@ namespace GregMod.Backplanes
                     try { links = CollectServerLinks(server); } catch { continue; }
                     if (links == null) continue;
                     bool touched = false;
+                    bool force = false;
+                    try { force = ModConfig.ForcePortSpeed; } catch { }
                     foreach (var link in links)
                     {
                         if (link == null) continue;
-                        try
+                        GetPortState(link, out bool hasCable, out bool hasModule, out bool deadRef);
+                        if (deadRef)
                         {
-                            if (link.cableIDsOnLink != 0 || link.insertedSFP != null) continue;
+                            try { link.insertedSFP = null; } catch { /* best-effort */ }
+                            try { hasModule = link.insertedSFP != null; } catch { hasModule = false; }
                         }
-                        catch { continue; }
+
+                        if ((hasCable || hasModule) && !force) continue;
 
                         float live = 0f;
                         try { live = link.connectionSpeed; } catch { continue; }
@@ -1356,14 +1361,15 @@ namespace GregMod.Backplanes
         {
             freeBad = 0;
             found = 0;
+            bool force = false;
+            try { force = ModConfig.ForcePortSpeed; } catch { }
             try
             {
                 foreach (var link in CollectServerLinks(server))
                 {
                     found++;
-                    bool busy = false;
-                    try { busy = link.cableIDsOnLink != 0 || link.insertedSFP != null; } catch { continue; }
-                    if (busy) continue;
+                    GetPortState(link, out bool hasCable, out bool hasModule, out _);
+                    if ((hasCable || hasModule) && !force) continue;
                     float ls;
                     try { ls = link.connectionSpeed; } catch { continue; }
                     if (!Approx(ls, spec.RuntimeNetworkSpeed)) freeBad++;
@@ -1371,6 +1377,37 @@ namespace GregMod.Backplanes
             }
             catch { /* best-effort */ }
             return found;
+        }
+
+        // Port-Zustand aufschlüsseln: Kabel-ID gesetzt? Modul live oder nur
+        // zerstörte Referenz (IL2CPP meldet tote Objekte als != null)?
+        private static void GetPortState(CableLink link, out bool hasCable, out bool hasModule, out bool deadModuleRef)
+        {
+            hasCable = false;
+            hasModule = false;
+            deadModuleRef = false;
+            if (link == null) return;
+            try { hasCable = link.cableIDsOnLink != 0; } catch { /* best-effort */ }
+            SFPModule module = null;
+            bool readable = false;
+            try
+            {
+                module = link.insertedSFP;
+                readable = true;
+            }
+            catch { readable = false; }
+
+            if (!readable || module == null) return;
+            bool alive = false;
+            try
+            {
+                var _ = module.gameObject;
+                alive = true;
+            }
+            catch { alive = false; }
+
+            if (alive) hasModule = true;
+            else deadModuleRef = true;
         }
 
         private static void DropWatched(IntPtr ptr)
@@ -1827,12 +1864,20 @@ namespace GregMod.Backplanes
         {
             try
             {
-                // Port in use (cable id assigned or SFP module inserted): hands off.
-                bool hasCable = false;
-                try { hasCable = link.cableIDsOnLink != 0; } catch { /* best-effort */ }
-                bool hasModule = false;
-                try { hasModule = link.insertedSFP != null; } catch { /* best-effort */ }
-                if (hasCable || hasModule) return false;
+                // Port in use (cable id assigned or live SFP module inserted):
+                // hands off — ausser ForcePortSpeed ist an. Zerstörte
+                // Modul-Refs (IL2CPP-Fake-Null) zählen als frei und werden
+                // bereinigt, sonst bleibt jeder Port ewig "belegt".
+                bool force = false;
+                try { force = ModConfig.ForcePortSpeed; } catch { }
+                GetPortState(link, out bool hasCable, out bool hasModule, out bool deadRef);
+                if (deadRef)
+                {
+                    try { link.insertedSFP = null; } catch { /* best-effort */ }
+                    try { hasModule = link.insertedSFP != null; } catch { hasModule = false; }
+                }
+
+                if ((hasCable || hasModule) && !force) return false;
 
                 bool changed = false;
                 float targetSpeed = spec.RuntimeNetworkSpeed;
@@ -1914,11 +1959,21 @@ namespace GregMod.Backplanes
                     return;
                 }
                 int checkedPorts = 0, badPorts = 0, foundPorts = 0, busyPorts = 0;
+                int busyCable = 0, busyModule = 0, busyDeadRef = 0;
                 foreach (var link in CollectServerLinks(server))
                 {
                     foundPorts++;
                     bool busy = false;
-                    try { busy = link.cableIDsOnLink != 0 || link.insertedSFP != null; } catch { continue; }
+                    try
+                    {
+                        GetPortState(link, out bool hasCable, out bool hasModule, out bool deadRef);
+                        if (deadRef) busyDeadRef++;
+                        else if (hasModule) busyModule++;
+                        else if (hasCable) busyCable++;
+                        busy = hasCable || hasModule;
+                    }
+                    catch { continue; }
+
                     if (busy) { busyPorts++; continue; }
                     checkedPorts++;
                     float ls;
@@ -1927,7 +1982,7 @@ namespace GregMod.Backplanes
                 }
                 Log.Info($"Verify {spec.VariantDisplayName} ({source}): OK " +
                     $"max={live:F3}, Ports gefunden={foundPorts}, geprueft={checkedPorts}, " +
-                    $"belegt={busyPorts}, abweichend={badPorts}.");
+                    $"belegt={busyPorts}(Kabel:{busyCable},Modul:{busyModule},tot:{busyDeadRef}), abweichend={badPorts}.");
                 if (badPorts > 0)
                 {
                     Log.Warning($"Verify {spec.VariantDisplayName}: {badPorts} freie Port(s) noch auf falscher " +
