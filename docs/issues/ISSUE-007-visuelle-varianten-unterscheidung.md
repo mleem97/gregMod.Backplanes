@@ -1,44 +1,44 @@
-# ISSUE-007 - Keine visuelle Unterscheidung der Varianten (wirkt "cheaty", 125K/5K verwechselbar)
+# ISSUE-007 - No visual distinction between variants (looks "cheaty", 125K/5K easily confused)
 
-- **Status:** Ok in v2.1.0 (Toggle `ServerTint`/`ServerScale`), Feedback offen
-- **Prioritaet:** Mittel
-- **Bereich:** Visuals (Tint/Scale), Shop-Karten-Labels
+- **Status:** OK in v2.1.0 (toggles `ServerTint`/`ServerScale`), feedback open
+- **Priority:** Medium
+- **Area:** Visuals (tint/scale), shop card labels
 - **Mod:** BackplaneBoostServers v1.0.0/v1.0.1 -> gregMod.Backplanes v2.1.0
-- **Berichte (Steam Workshop):**
-  - *MFDuskink* - "the game frequently convert 125 into 5" + kein Unterschied sichtbar;
-    125K-Karten sehen aus wie Standard.
-  - *H3draut3r, 12 Aug* - Original-Modelle fuer beide Tiers sehen "cheaty" aus; Wunsch:
-    Groessen-Skalierung (wie bei echten Servern: 500K = 40U, 125K = 15U) ggf. auch
-    Farbschema fuer IOPS-Server.
-  - *Gothicdude1044, 20 May* - Farben der modded Server bei Default-Schema der Vanilla
-    belassen (kombinierbar mit ISSUE-004).
+- **Reports (Steam Workshop):**
+  - *MFDuskink* - "the game frequently convert 125 into 5" + no visible difference;
+    125K cards look like standard.
+  - *H3draut3r, 12 Aug* - stock models for both tiers look "cheaty"; wish:
+    size scaling (like real servers: 500K = 40U, 125K = 15U), possibly also a
+    color scheme for IOPS servers.
+  - *Gothicdude1044, 20 May* - keep the colors of the modded servers on the vanilla default
+    scheme (combinable with ISSUE-004).
 
 ## Symptom
-Die aufgeboosteten Server sind von Vanilla nicht unterscheidbar (gleiche 3U/7U-Groesse,
-gleiche Farben) -> Spieler erkennen nach Reload nicht, ob ihre 125K/500K "noch da" sind;
-125K wird leicht mit 5K verwechselt.
+The boosted servers are indistinguishable from vanilla (same 3U/7U size,
+same colors) -> after reload, players can't tell whether their 125K/500K are "still there";
+125K is easily confused with 5K.
 
-## Erwartet vs. Tatsaechlich
-- **Erwartet:** Varianten klar erkennbar (Groesse und/oder Farbe), Karten verstaendlich
-  benannt.
-- **Tatsaechlich:** v1.x liess Server optisch identisch mit Basis-Modellen.
+## Expected vs. actual
+- **Expected:** Variants clearly recognizable (size and/or color), cards named
+  understandably.
+- **Actual:** v1.x left servers visually identical to the base models.
 
-## Stand in v2.1.0
-- **Tint:** Familien-Materialien werden zur Laufzeit umgefaerbt (SystemX->orange,
-  RISC->violett, Mainframe->rot, GPU->lime; 500K heller); Matching per Basisfarb-Naehe +
-  Familien-Farbwort-Fallback; Screens/Lichter/Glas ausgenommen. Toggle `ServerTint` (on).
-- **Scale:** absolute Y-Skalierung 4/3 (klein) / 8/7 (gross) fuer 4U/8U-Look. **Visuell
-  nur** - Rack-Slot-Belegung unveraendert, Nachbarn koennen sich visuell ueberlappen.
+## State in v2.1.0
+- **Tint:** Family materials are recolored at runtime (SystemX->orange,
+  RISC->violet, Mainframe->red, GPU->lime; 500K brighter); matching by base-color proximity +
+  family color-word fallback; screens/lights/glass excluded. Toggle `ServerTint` (on).
+- **Scale:** absolute Y scaling 4/3 (small) / 8/7 (large) for a 4U/8U look. **Visual
+  only** - rack-slot occupancy unchanged, neighbors may visually overlap.
   Toggle `ServerScale` (on).
-- **100K-Tier:** kleine Varianten nun 100K IOPS (intern speed 1.0); IDs
-  `greg_backplanes_*_100k`; alte `125k`-Marker (alle Legacy-Praefixe) loesen zu 100K auf
-  und werden beim Speichern normalisiert. Preise/XP unveraendert.
-- **Karten:** Shop-Karten tragen Labels "+ 1-lane fiber" / "+ 4-lane fiber" mit
-  unterschiedlichen Preisen (seit v2.0.0).
+- **100K tier:** small variants are now 100K IOPS (internal speed 1.0); IDs
+  `greg_backplanes_*_100k`; old `125k` markers (all legacy prefixes) resolve to 100K
+  and are normalized on save. Prices/XP unchanged.
+- **Cards:** Shop cards carry labels "+ 1-lane fiber" / "+ 4-lane fiber" with
+  different prices (since v2.0.0).
 
-## Verbleibende Arbeit / To-Verify
-1. Skalen-Wirkung in dicht bepackten Racks pruefen (ueberlappt optisch mit Nachbarn) -
-  ggf. Doku-Warnung auf der Workshop-Seite.
-2. Spieler-Feedback einholen, ob Tint+Scale die Verwechslung 125K/5K aus der Welt schafft.
-3. "40U/15U"-Grosserollwunsch (H3draut3r) technisch nicht umsetzbar (Rack-Slots sind es
-   nicht), daher als bewusste Groessenentscheidung dokumentieren.
+## Remaining work / To-Verify
+1. Check the scale effect in densely packed racks (visually overlaps with neighbors) -
+  possibly a docs warning on the Workshop page.
+2. Collect player feedback on whether tint+scale eliminate the 125K/5K confusion.
+3. "40U/15U" size wish (H3draut3r) technically not feasible (rack slots aren't),
+   so document it as a deliberate sizing decision.

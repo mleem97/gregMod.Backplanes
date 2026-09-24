@@ -1,43 +1,43 @@
 # BUGFIX_NOTES — v1.x reports → v2.x fixes
 
-## v2.2.3 — Bulk-Käufe: falsche Spec bei gemischten Preispunkten (2026-09-23)
+## v2.2.3 — Bulk buys: wrong spec at mixed price points (2026-09-23)
 
-**Symptom:** 30 Units auf einmal (LargerCart), z.B. 15× SystemX 100K + 15×
-RISC 100K (beide 20K) — alle Spawns bekamen die Spec des ersten Queue-Eintrags
-(`PeekPendingSpecForSpawn` matcht nur nach Preis). Zusätzlich warf der
-Pending-Cap (12) ab dem 13. Klick die ältesten Einträge weg.
+**Symptom:** 30 units at once (LargerCart), e.g. 15× SystemX 100K + 15×
+RISC 100K (both 20K) — all spawns got the spec of the first queue entry
+(`PeekPendingSpecForSpawn` only matches by price). Additionally, the
+pending cap (12) dropped the oldest entries from the 13th click on.
 
-**Root cause:** Preis ist kein eindeutiger Key (4 Familien × 5 Stufen teilen
-5 Preise); Queue-Cap für Single-Käufe dimensioniert.
+**Root cause:** Price is no unique key (4 families × 5 tiers share
+5 prices); queue cap sized for single buys.
 
 **Fix:**
-- `BeginCheckoutSnapshot` im `SpawnAll`-Prefix: Spec pro Unit in
-  Cart-Reihenfolge; `ConsumeCheckoutSpec` pro `SpawnPhysicalItem`.
-- `GoMatchesSpecFamily` am Prefab: bei Cart-Order-Drift Korrektur via Preis-Peek.
-- Pending-Cap 12 → 200; `VerifyCheckout` + `NotifyCore` (gregCore-Toast) bei
-  konfiguriert ≠ erwartet.
+- `BeginCheckoutSnapshot` in the `SpawnAll` prefix: spec per unit in
+  cart order; `ConsumeCheckoutSpec` per `SpawnPhysicalItem`.
+- `GoMatchesSpecFamily` on the prefab: correction via price peek on cart-order drift.
+- Pending cap 12 → 200; `VerifyCheckout` + `NotifyCore` (gregCore toast) on
+  configured ≠ expected.
 
 ---
 
-## v2.2.2 — Boosted-Server spawnen nicht (Playtest, 2026-09-23)
+## v2.2.2 — Boosted servers don't spawn (playtest, 2026-09-23)
 
-**Symptom:** Karte kaufbar (`Buy: id=9001 … Tracked purchase`), Cart voll,
-`SpawnAllPurchasedItems` läuft durch — aber **kein** `SpawnPhysicalItem`,
-`spawnedItems` bleibt `count=0`. Vanilla-Käufe (`id=0`/`id=2`) spawnen normal.
+**Symptom:** Card buyable (`Buy: id=9001 … Tracked purchase`), cart full,
+`SpawnAllPurchasedItems` runs through — but **no** `SpawnPhysicalItem`,
+`spawnedItems` stays `count=0`. Vanilla buys (`id=0`/`id=2`) spawn normally.
 
-**Root cause:** `CatalogInjector.TryGetBaseId` verlangte `baseItemId != 0`.
-Vanilla-SystemX-Shopkarte hat `itemID=0` (`Buy: id=0 … name='System X 3U …'`),
-die Map hielt also `9001 → 0`. Der Check verhinderte das Remap in
-`GetPrefabForItemPrefix` → Original suchte itemID 9001 → null → Spawn übersprungen.
+**Root cause:** `CatalogInjector.TryGetBaseId` required `baseItemId != 0`.
+The vanilla SystemX shop card has `itemID=0` (`Buy: id=0 … name='System X 3U …'`),
+so the map held `9001 → 0`. The check prevented the remap in
+`GetPrefabForItemPrefix` → original looked up itemID 9001 → null → spawn skipped.
 
-Zweite Lücke: `ShopContainsVariant`-Early-Path markierte die Karte nur als
-registriert, ohne die Base-ID-Map nach `ResetForScene` neu zu füllen — nach
-Scene-Wechsel fehlte das Routing auch bei korrekter Karte.
+Second gap: the `ShopContainsVariant` early path only marked the card as
+registered without refilling the base-ID map after `ResetForScene` — after a
+scene change the routing was missing even with a correct card.
 
 **Fix:**
-- `TryGetBaseId`: Erfolg = Key vorhanden (0 ist gültige Base-ID).
-- `EnsureBaseIdMapping` beim Already-Registered-Pfad; Registrierungslog mit `baseId=`.
-- Warnung in `GetPrefabForItemPrefix`, wenn 9001–9021 ohne Base-ID durchlaufen.
+- `TryGetBaseId`: success = key present (0 is a valid base ID).
+- `EnsureBaseIdMapping` on the already-registered path; registration log with `baseId=`.
+- Warning in `GetPrefabForItemPrefix` when 9001–9021 pass through without a base ID.
 
 ---
 

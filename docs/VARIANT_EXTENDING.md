@@ -1,16 +1,16 @@
-# VARIANT_EXTENDING — eigene Server-Varianten hinzufügen
+# VARIANT_EXTENDING — adding your own server variants
 
-Alle Varianten sind datengetrieben in `src/ServerVariantSpec.cs` (`ServerVariantSpec.All`,
-aktuell 20 Einträge über `Make(...)`). Eine neue Variante ist ein Eintrag — kein neuer
-Patch nötig.
+All variants are data-driven in `src/ServerVariantSpec.cs` (`ServerVariantSpec.All`,
+currently 20 entries via `Make(...)`). A new variant is one entry — no new
+patch needed.
 
 ## Tiers (v2.2.0)
 
-Pro Familie: **100K/25G · 500K/40G · 1M/100G · 2M/200G · 4M/400G** — mehr Gbps = teurer.
-Ab 40G `SfpType = 3` (Vanilla-QSFP+), damit **gregMod.MoreModules**-Module (QSFP28/56/DD)
-ohne Port-Hacks passen. `RecommendedModule` landet im Shop-Label.
+Per family: **100K/25G · 500K/40G · 1M/100G · 2M/200G · 4M/400G** — more Gbps = pricier.
+From 40G `SfpType = 3` (vanilla QSFP+), so **gregMod.MoreModules** modules (QSFP28/56/DD)
+fit without port hacks. `RecommendedModule` ends up in the shop label.
 
-## Beispiel: 1M-IOPS Variante auf Mainframe-7U-Basis (`Make(...)`)
+## Example: 1M-IOPS variant on a Mainframe 7U base (`Make(...)`)
 
 ```csharp
 Make(
@@ -35,38 +35,38 @@ Make(
 ),
 ```
 
-`SizeKey` und `VariantId` leiten sich aus IOPS ab (`100k`/`500k`/`1m`/`2m`/`4m`).
+`SizeKey` and `VariantId` derive from IOPS (`100k`/`500k`/`1m`/`2m`/`4m`).
 
-## Regeln
+## Rules
 
-1. **`BaseDisplayName` / `BaseAssetName`** müssen exakt zum Vanilla-ShopItem passen
-   (Familie + 3U/7U). Die Mod findet den Basis-Button per `Contains`-Match.
-2. **`Iops` → interne Speed = Iops / 100000.** 100000 → 1.0, 500000 → 5.0.
-   Die 3U-Basis läuft mit 0.05 (5K), die 7U-Basis mit 0.12 (12K) — als `BaseSpeed`
-   explizit setzen (klein→3U-Basis, groß→7U-Basis).
-3. **`NetworkSpeedGbps` → intern /5** (25G→5, 40G→8). Reine Port-Obergrenze für
-   leere Ports; belegte Ports werden nie angefasst.
-4. **`VariantId` ist die Persistenz-Identität** (Sidecar `server-variants.tsv`).
-   Einmal in Saves verwendet → nie umbenennen, sonst verwaiste Marker (sie werden
-   geloggt, aber nicht mehr zugeordnet). Legacy-Präfixe siehe `LegacyPrefixes`.
-5. **`FiberLaneCount` / `RecommendedModule`** steuern nur Shop-Label und die
-   Kabel-/Modul-Empfehlung — geblockt wird nichts.
-6. **MoreModules:** ab 40G `SfpType = 3` (Vanilla-QSFP+) belassen; Modul-Gbps landet
-   in `RecommendedModule` (z. B. `QSFP56 200G`). IDs 9001–9020 bleiben frei von
+1. **`BaseDisplayName` / `BaseAssetName`** must match the vanilla shop item exactly
+   (family + 3U/7U). The mod finds the base button via `Contains` match.
+2. **`Iops` → internal speed = Iops / 100000.** 100000 → 1.0, 500000 → 5.0.
+   The 3U base runs at 0.05 (5K), the 7U base at 0.12 (12K) — set explicitly as `BaseSpeed`
+   (small→3U base, large→7U base).
+3. **`NetworkSpeedGbps` → internal /5** (25G→5, 40G→8). Pure port ceiling for
+   empty ports; occupied ports are never touched.
+4. **`VariantId` is the persistence identity** (sidecar `server-variants.tsv`).
+   Once used in saves → never rename, otherwise orphaned markers (they get
+   logged but are no longer assigned). Legacy prefixes see `LegacyPrefixes`.
+5. **`FiberLaneCount` / `RecommendedModule`** only control the shop label and the
+   cable/module recommendation — nothing is blocked.
+6. **MoreModules:** from 40G keep `SfpType = 3` (vanilla QSFP+); module Gbps goes
+   into `RecommendedModule` (e.g. `QSFP56 200G`). IDs 9001–9020 stay free of
    MoreModules (1000–3999).
-7. **Größenwahn vermeiden:** extrem hohe IOPS-Werte (> ein paar Millionen) wurden nicht
-   getestet; das Spiel balanciert Kundenbedarfe um Vanilla-Werte.
-8. **Visuals:** `TintColor` aus dem Familien-Schema wählen (SystemX=Orange, RISC=Violett,
-   Mainframe=Rot, GPU=Lime; höhere Tier jeweils kräftiger). `FamilyBaseColor` = Vanilla-Körperfarbe
-   für das Material-Matching. `ScaleY` = 4/3 (3U) bzw. 8/7 (7U) — visuell only.
+7. **Avoid excess:** extremely high IOPS values (> a few million) were not
+   tested; the game balances customer demand around vanilla values.
+8. **Visuals:** pick `TintColor` from the family scheme (SystemX=orange, RISC=violet,
+   Mainframe=red, GPU=lime; higher tier brighter each time). `FamilyBaseColor` = vanilla body color
+   for material matching. `ScaleY` = 4/3 (3U) resp. 8/7 (7U) — visual only.
 
-## Test-Checkliste (im Spiel)
+## Test checklist (in game)
 
-- [ ] Alle 20 Shop-Einträge: Name, Preis, XP, empfohlenes Modul
-- [ ] Kauf → Rack-Einbau → IOPS + Port-Speed korrekt, Farbe + Höhe sichtbar
-- [ ] Leere Ports: 40/100/200/400 Gbps statt 1 Gbps; belegte Ports unangetastet
-- [ ] MoreModules-Module (100G–400G) stecken in QSFP+-Ports ohne Port-Hacks
-- [ ] Save → Quit to Desktop → Reload → Werte + Visuals bleiben (ohne Neu-Kauf)
-- [ ] Kabel abziehen/wieder anstecken funktioniert
-- [ ] Technician-Reparatur (EOL) behält die Variante
-- [ ] Custom-farbige Kabel/Racks funktionieren weiterhin
+- [ ] All 20 shop entries: name, price, XP, recommended module
+- [ ] Buy → rack install → IOPS + port speed correct, color + height visible
+- [ ] Empty ports: 40/100/200/400 Gbps instead of 1 Gbps; occupied ports untouched
+- [ ] MoreModules modules (100G–400G) plug into QSFP+ ports without port hacks
+- [ ] Save → quit to desktop → reload → values + visuals persist (no rebuy)
+- [ ] Unplug/replug cables works
+- [ ] Technician repair (EOL) keeps the variant
+- [ ] Custom-colored cables/racks keep working

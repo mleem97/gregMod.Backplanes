@@ -1,36 +1,36 @@
-# ISSUE-006 - Inkompatibilitaet mit "Svc Service"-Mod: Saves laden nicht
+# ISSUE-006 - Incompatibility with the "Svc Service" mod: saves don't load
 
-- **Status:** Open (v2.1.0 bislang nur harmlosere Hook-Flaeche) - siehe `../BUGFIX_NOTES.md` #9
-- **Prioritaet:** Mittel
-- **Bereich:** Kompatibilitaet, Patch-Surface
+- **Status:** Open (v2.1.0 so far only a less invasive hook surface) - see `../BUGFIX_NOTES.md` #9
+- **Priority:** Medium
+- **Area:** Compatibility, patch surface
 - **Mod:** BackplaneBoostServers v1.0.0/v1.0.1 -> gregMod.Backplanes v2.1.0
-- **Berichte (Steam Workshop):**
-  - *szymon511* - mit "Svc Service"-Mod zusammen installiert: Spiel laedt das Save nicht
-    (haengend/abstuerzend) solange beide Mods aktiv sind.
-  - *BrassPeddler* - bestaetigt dieselbe Fehlfunktion (siehe auch ISSUE-002, gleiche
-    Umgebung).
+- **Reports (Steam Workshop):**
+  - *szymon511* - with the "Svc Service" mod installed alongside: the game doesn't load the save
+    (hanging/crashing) as long as both mods are active.
+  - *BrassPeddler* - confirms the same malfunction (see also ISSUE-002, same
+    environment).
 
 ## Symptom
-Saves starten nicht, wenn BackplaneBoostServers zusammen mit "Svc Service" aktiv ist.
+Saves don't start when BackplaneBoostServers is active together with "Svc Service".
 
-## Erwartet vs. Tatsaechlich
-- **Erwartet:** Beide Mods koexistieren.
-- **Tatsaechlich:** Save-Load bricht ab/haengt (v1.x).
+## Expected vs. actual
+- **Expected:** Both mods coexist.
+- **Actual:** Save load aborts/hangs (v1.x).
 
-## Bekannte Root-Cause (v1.0.x, aus `../BUGFIX_NOTES.md` #9, vermutlich)
-V1.x patchte ein breites reflektives Feld (`Server.Awake/Start/OnEnable`,
-`ShopItem.Awake/Start/UpdateVisualState`, `Technician.*`, Assembly-weite statische Scans),
-das mit fremden Patches und den Caches anderer Mods kollidiert.
+## Known root cause (v1.0.x, from `../BUGFIX_NOTES.md` #9, presumably)
+V1.x patched a wide reflective surface (`Server.Awake/Start/OnEnable`,
+`ShopItem.Awake/Start/UpdateVisualState`, `Technician.*`, assembly-wide static scans),
+which collides with foreign patches and other mods' caches.
 
 ## Fix in v2.1.0
-Minimale Hook-Flaeche (11 Patch-Methoden; keine `ShopItem`/`Technician`-Patches; keine
-Assembly-weiten Scans); jeder Patch ist exception-proof (Mod kann den Game-Thread nie
-versoegen). Koexistenz ist noch NICHT in-game verifiziert.
+Minimal hook surface (11 patch methods; no `ShopItem`/`Technician` patches; no
+assembly-wide scans); every patch is exception-proof (the mod can never take down
+the game thread). Coexistence is still NOT verified in game.
 
-## Verbleibende Arbeit / To-Verify
-1. Testszenario "Svc Service + gregMod.Backplanes v2.1.0": Save ohne modded Server laden,
-   dann Save mit modded Servern; jeweils Startverhalten + Log pruefen.
-2. Falls weiterhin blockiert: Hook-Konflikte per Patch-Report identifizieren
-   (Harmony `PatchProcessor.GetOriginalInstructions`), ggf. `Server.Start`-Patch gegen
-   Postfix/Dependency dynamisch aufloesen.
-3. Ergebnis (ok/immer noch kaputt) auf der Workshop-Seite / im CHANGELOG vermerken.
+## Remaining work / To-Verify
+1. Test scenario "Svc Service + gregMod.Backplanes v2.1.0": load a save without modded servers,
+   then a save with modded servers; check startup behavior + log in each case.
+2. If still blocked: identify hook conflicts via patch report
+   (Harmony `PatchProcessor.GetOriginalInstructions`), possibly resolve the `Server.Start` patch
+   dynamically against postfix/dependency.
+3. Record the result (OK/still broken) on the Workshop page / in the CHANGELOG.

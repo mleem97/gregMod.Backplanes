@@ -1,7 +1,7 @@
-# _legacy — Original-Mod (Referenz, kein Build-Input)
+# _legacy — Original mod (reference, no build input)
 
-- `BackplaneBoostServers.v1.0.1.dll` — letzte Workshop-Version von HighFreak1c
-  (kopiert aus `gregMod.Backpanes/BackplaneBoostServers.dll`, nur umbenannt).
-- Dient als Decompile-/Verhaltens-Referenz für den `gregMod.Backplanes`-Refactor.
-- Wird **nicht** kompiliert und darf **nicht** zusammen mit `gregMod.Backplanes.dll`
-  in `Data Center/Mods/` liegen (doppelte Varianten-Registrierung).
+- `BackplaneBoostServers.v1.0.1.dll` — last Workshop version by HighFreak1c
+  (copied from `gregMod.Backpanes/BackplaneBoostServers.dll`, only renamed).
+- Serves as a decompile/behavior reference for the `gregMod.Backplanes` refactor.
+- Is **not** compiled and must **not** sit together with `gregMod.Backplanes.dll`
+  in `Data Center/Mods/` (duplicate variant registration).

@@ -1,40 +1,40 @@
-# ISSUE-009 - Installation/Onboarding (MelonLoader + FixCoreModule) ist Support-Last
+# ISSUE-009 - Installation/onboarding (MelonLoader + FixCoreModule) is a support burden
 
-- **Status:** Teil-Fix (README-Install-Sektion gepflegt, v2.1.1); Workshop-Version offen
-- **Prioritaet:** Niedrig
-- **Bereich:** Docs/Ship-Being (Workshop-Seite, README)
-- **Mod:** alle (betrifft BackplaneBoostServers / gregMod.Backplanes exemplarisch)
-- **Berichte (Steam Workshop):**
-  - *Brilyn911, 18 May* - gab eine Schritt-fuer-Schritt-Anleitung (MelonLoader 0.7.2/0.7.3
-    via Steam mit MelonLoader-Installer, FixCoreModule als NEUER Mod-Loader /
-    Compatibility-Layer) - wiederkehrender Support-Bedarf bei "Mod fehlt / DLL wird nicht
-    geladen" / "Game wird gestartet, aber keine Mod".
+- **Status:** Partial fix (README install section maintained, v2.1.1); Workshop version open
+- **Priority:** Low
+- **Area:** Docs/Ship-Being (Workshop page, README)
+- **Mod:** all (affects BackplaneBoostServers / gregMod.Backplanes as an example)
+- **Reports (Steam Workshop):**
+  - *Brilyn911, 18 May* - gave a step-by-step guide (MelonLoader 0.7.2/0.7.3
+    via Steam with the MelonLoader installer, FixCoreModule as a NEW mod loader /
+    compatibility layer) - recurring support demand for "mod missing / DLL not
+    loaded" / "game starts, but no mod".
 
 ## Symptom
-Viele Nutzer scheitern am Setup: MelonLoader + FixCoreModule (fuer Unity 6000.x) +
-Mod-DLL in `Data Center/Mods/`. Der Install-Workflow ist kein einmaliger Thread, sondern
-regelmaessige Support-Anfragen.
+Many users fail at setup: MelonLoader + FixCoreModule (for Unity 6000.x) +
+mod DLL in `Data Center/Mods/`. The install workflow is not a one-off thread but
+regular support requests.
 
-## Erwartet vs. Tatsaechlich
-- **Erwartet:** Ein leicht auffindbarer Install-Pfad auf der Workshop- oder Projektseite.
-- **Tatsaechlich:** Verstreut in Threads/Kommentaren; easige falsche Reihenfolge
-  (FixCoreModule nicht als Mod, sondern als Loader-Helfer) -> Mod "erscheint nicht".
+## Expected vs. actual
+- **Expected:** An easy-to-find install path on the Workshop or project page.
+- **Actual:** Scattered across threads/comments; a common wrong order
+  (FixCoreModule not as a mod but as a loader helper) -> mod "doesn't show up".
 
-## Vorschlag
-1. Kurze Install-Sektion in `README.md` (gilt auch fuer gregCore-abhaengige Mods):
-   - MelonLoader (Steam-Installer), Ziel: "Data Center"
-   - FixCoreModule in `Mods/` (Compatibility fuer Unity 6 / IL2CPP-Metadata)
-   - gregMod.DLLs nach `Data Center/Mods/`
-   - Validate: log/`F5`-Panel erscheint; Fehlersuche: `MelonLoader`-Ordner-Log.
-2. Workshop-Beschreibung um die ersten 3 Schritte erweitern.
-3. (Optional) `gregModmanager` als Installer bewerben, sobald die Workshop-/Steam-Quellen
-   dort unterstuetzt werden.
+## Proposal
+1. Short install section in `README.md` (also applies to gregCore-dependent mods):
+   - MelonLoader (Steam installer), target: "Data Center"
+   - FixCoreModule in `Mods/` (compatibility for Unity 6 / IL2CPP metadata)
+   - gregMod DLLs to `Data Center/Mods/`
+   - Validate: log/`F5` panel shows up; troubleshooting: `MelonLoader` folder log.
+2. Extend the Workshop description with the first 3 steps.
+3. (Optional) Promote `gregModmanager` as the installer once the Workshop/Steam sources
+   are supported there.
 
-## Stand v2.1.1
-- README-`Installation`-Sektion ist gepflegt (MelonLoader >= 0.7.2, gregCore-Hinweis,
-  V1-DLL-Entfernung, Marker-Migration): `README.md#Installation`.
-- Offen: Workshop-Beschreibung (`SteamWorkshop_Beschreibungen.md`) um Schritt 1-3 erweitern
-  und Install-Fehlersuche (MelonLoader-Log) verlinken.
+## State in v2.1.1
+- README `Installation` section is maintained (MelonLoader >= 0.7.2, gregCore note,
+  V1 DLL removal, marker migration): `README.md#Installation`.
+- Open: extend the Workshop description (`SteamWorkshop_Beschreibungen.md`) with steps 1-3
+  and link install troubleshooting (MelonLoader log).
 
-## Verbleibende Arbeit
-- Workshop-Seite: Install-Schritte 1-3 + Troubleshooting-Link einpflegen.
+## Remaining work
+- Workshop page: add install steps 1-3 + troubleshooting link.
