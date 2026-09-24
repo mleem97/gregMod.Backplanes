@@ -1,5 +1,24 @@
 # Changelog
 
+## Unreleased
+
+- **Phantom-Module entfernt:** `ConfigurePort` schreibt `sfpTypeInserted` nicht
+  mehr auf leere Ports (blockierte echte SFP+/SFP28-Module + renderte nichts).
+  Altlasten (Typ gesetzt ohne Modul) werden auf 0 zurückgesetzt — alte Saves heilen.
+- **Port-Cap-Re-Assert:** `CableLink.InsertSFP`-Postfix hebt den Cap einmalig auf
+  Tier-Speed, falls vorher niedrig verhandelt (nur anheben, Module unangetastet).
+- **Link-Audit in Verify:** „Verify now" loggt pro belegtem Varianten-Port Cap,
+  Kabel, Modul (+Modul-Speed) und Gegenseite (`Link-Audit …`) — 1-Gbps-Ursachen
+  ohne Raten.
+- **Material-Discovery gehärtet:** einmal pro Familie (statt pro Configure);
+  exakte Body-Materialnamen für SystemX (`BrushedAluminiumYellow`, `Yellow`),
+  Rest weiter per Proximity.
+- **Model-Discovery:** einmal pro Familie Hierarchy + Mesh-Namen + Renderer
+  (`Model discovery …`) als Austausch-Basis für Server-Modelle.
+- **Checkout-Farben für Mengen:** Vanilla ruft `ApplyColorToSpawnedItem` pro Spawn
+  mit stale UID — Redirect auf frischesten Checkout-Spawn; Sweep verteilt
+  Zeilen-Quantity auf aufeinanderfolgende Spawns (6× Rack → 6× Farbe).
+
 ## v2.2.3
 
 - **Bulk purchases (30+ units, mixed families at the same price):** spawn

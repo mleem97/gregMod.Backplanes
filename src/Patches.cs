@@ -21,6 +21,11 @@ namespace GregMod.Backplanes
     /// </list>
     /// ShopItem.Start/UpdateVisualState/OnLoad ARE patched: the game looks up
     /// names by ItemID and shows "Unknown" for 9001–9020 unless we rewrite after.
+    ///
+    /// CableLink speed methods ARE patched (postfix only): our ports are
+    /// registered once in PortSpeedMemory at ConfigurePort; these hooks
+    /// re-assert the target speed on drift — event-driven, no polling.
+    /// Vanilla ports are never registered, so the hooks are no-ops for them.
     /// </summary>
     internal static class Patches
     {
@@ -227,8 +232,7 @@ namespace GregMod.Backplanes
 
         [HarmonyPatch(typeof(ComputerShop), nameof(ComputerShop.SpawnPhysicalItem))]
         [HarmonyPostfix]
-        private static void SpawnPhysicalPostfix(ComputerShop __instance, GameObject prefab, int price,
-            PlayerManager.ObjectInHand itemType, Il2CppSystem.Nullable<int> __result)
+        private static void SpawnPhysicalPostfix(ComputerShop __instance, GameObject prefab, int price,            PlayerManager.ObjectInHand itemType, Il2CppSystem.Nullable<int> __result)
         {
             try
             {
@@ -276,6 +280,60 @@ namespace GregMod.Backplanes
             {
                 Log.Error("SpawnPhysicalPostfix failed.", ex);
             }
+        }
+
+        // ------------------------------------------------------- port speeds
+        // Event-driven (no polling): PortSpeedMemory holds our ports' target
+        // speeds; these postfixes re-assert on drift. Every real correction
+        // logs one line (hook, old -> new) — that IS the diagnostic showing
+        // which vanilla path rewrites speeds. No-drift calls stay silent.
+
+        [HarmonyPatch(typeof(CableLink), nameof(CableLink.SetConnectionSpeed))]
+        [HarmonyPostfix]
+        private static void CableLinkSetSpeedPostfix(CableLink __instance)
+        {
+            try
+            {
+                if (__instance == null) return;
+                PortSpeedMemory.Enforce(__instance, "SetConnectionSpeed");
+            }
+            catch { }
+        }
+
+        [HarmonyPatch(typeof(CableLink), nameof(CableLink.InsertSFP))]
+        [HarmonyPostfix]
+        private static void CableLinkInsertSFPPostfix(CableLink __instance)
+        {
+            try
+            {
+                if (__instance == null) return;
+                PortSpeedMemory.Enforce(__instance, "InsertSFP");
+            }
+            catch { }
+        }
+
+        [HarmonyPatch(typeof(CableLink), nameof(CableLink.InteractOnClick))]
+        [HarmonyPostfix]
+        private static void CableLinkInteractPostfix(CableLink __instance)
+        {
+            try
+            {
+                if (__instance == null) return;
+                PortSpeedMemory.Enforce(__instance, "InteractOnClick");
+            }
+            catch { }
+        }
+
+        [HarmonyPatch(typeof(CableLink), nameof(CableLink.SecondActionOnClick))]
+        [HarmonyPostfix]
+        private static void CableLinkSecondActionPostfix(CableLink __instance)
+        {
+            try
+            {
+                if (__instance == null) return;
+                PortSpeedMemory.Enforce(__instance, "SecondActionOnClick");
+            }
+            catch { }
         }
 
         [HarmonyPatch(typeof(ComputerShop), "SpawnAllPurchasedItems")]
