@@ -4,6 +4,17 @@ Format: [Keep a Changelog](https://keepachangelog.com/de/1.0.0/).
 
 ## [Unreleased]
 
+### Added
+
+- `PortSpeedMemory`: event-getriebene Port-Speed-Durchsetzung ohne Polling.
+  `ConfigurePort` registriert unsere Ports einmalig (Instance-ID + Target-Speed);
+  `InsertSFP`/`InteractOnClick` (bestehend) plus neu `SetConnectionSpeed`/
+  `SecondActionOnClick`-Postfixes korrigieren Drift per direktem Feld-Write.
+  Vanilla-Ports nie registriert (kein Einfluss); stale Eintraege
+  selbstbereinigend per Referenz-Check; Clear bei Szenen-Laden. Jede echte
+  Korrektur loggt eine Zeile (`PortSpeed [Hook]: alt -> neu (Name)`) als
+  Diagnose, welcher Vanilla-Pfad Speeds zurueckschreibt.
+
 ## [2.2.3] — 2026-09-23
 
 ### Fixed

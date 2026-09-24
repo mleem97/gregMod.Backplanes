@@ -1864,6 +1864,9 @@ namespace GregMod.Backplanes
         {
             try
             {
+                // Event-driven memory (no polling): our ports are registered
+                // once — CableLink event postfixes re-assert the speed on drift.
+                try { if (link != null && spec != null) PortSpeedMemory.Register(link, spec.RuntimeNetworkSpeed); } catch { }
                 // Port in use (cable id assigned or live SFP module inserted):
                 // hands off — ausser ForcePortSpeed ist an. Zerstörte
                 // Modul-Refs (IL2CPP-Fake-Null) zählen als frei und werden

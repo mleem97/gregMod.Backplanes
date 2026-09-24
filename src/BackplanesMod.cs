@@ -138,6 +138,7 @@ namespace GregMod.Backplanes
             {
                 Log.Info($"Scene loaded: {sceneName} ({buildIndex}).");
                 Injector.ResetForScene();
+                PortSpeedMemory.Clear();
                 Injector.BeginRepairWindow();
                 // Best-effort early registration; shop-open triggers cover the rest.
                 try
