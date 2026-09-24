@@ -160,7 +160,7 @@ namespace GregMod.Backplanes
             // Click routing for the panel (fallback when no EventSystem delivers).
             try { BackplanesOverlay.RouteClicks(); } catch (Exception ex) { Log.Error("Click routing failed.", ex); }
 
-            // RGB stripe: hue rotation for tracked titan materials.
+            // RGB stripes: hue rotation for tracked Titan materials.
             try { RgbAnimator.Tick(); } catch (Exception ex) { Log.Error("RGB tick failed.", ex); }
 
             try

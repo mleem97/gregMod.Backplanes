@@ -973,6 +973,7 @@ string goName = "?";
             {
                 if (__instance == null) return;
                 CableGuard.DiagnosePostClick(__instance);
+                PortSpeedMemory.Enforce(__instance, "InteractOnClick");
             }
             catch (Exception ex)
             {
@@ -992,11 +993,39 @@ string goName = "?";
             {
                 if (__instance == null) return;
                 BackplanesMod.Injector.ReassertPortCapAfterModuleInsert("CableLink.InsertSFP", __instance);
+                PortSpeedMemory.Enforce(__instance, "InsertSFP");
             }
             catch (Exception ex)
             {
                 Log.Warning("CableLinkInsertSFPPostfix failed: " + ex.Message);
             }
+        }
+
+        // Missing vanilla paths: exact-speed memory hooks (event-driven, no
+        // polling). Every real correction logs one line (hook, old -> new) —
+        // that IS the diagnostic showing which vanilla path rewrites speeds.
+        [HarmonyPatch(typeof(CableLink), nameof(CableLink.SetConnectionSpeed))]
+        [HarmonyPostfix]
+        private static void CableLinkSetSpeedPostfix(CableLink __instance)
+        {
+            try
+            {
+                if (__instance == null) return;
+                PortSpeedMemory.Enforce(__instance, "SetConnectionSpeed");
+            }
+            catch { }
+        }
+
+        [HarmonyPatch(typeof(CableLink), nameof(CableLink.SecondActionOnClick))]
+        [HarmonyPostfix]
+        private static void CableLinkSecondActionPostfix(CableLink __instance)
+        {
+            try
+            {
+                if (__instance == null) return;
+                PortSpeedMemory.Enforce(__instance, "SecondActionOnClick");
+            }
+            catch { }
         }
     }
 }
