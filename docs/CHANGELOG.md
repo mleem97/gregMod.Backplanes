@@ -2,22 +2,22 @@
 
 ## Unreleased
 
-- **Phantom-Module entfernt:** `ConfigurePort` schreibt `sfpTypeInserted` nicht
-  mehr auf leere Ports (blockierte echte SFP+/SFP28-Module + renderte nichts).
-  Altlasten (Typ gesetzt ohne Modul) werden auf 0 zurückgesetzt — alte Saves heilen.
-- **Port-Cap-Re-Assert:** `CableLink.InsertSFP`-Postfix hebt den Cap einmalig auf
-  Tier-Speed, falls vorher niedrig verhandelt (nur anheben, Module unangetastet).
-- **Link-Audit in Verify:** „Verify now" loggt pro belegtem Varianten-Port Cap,
-  Kabel, Modul (+Modul-Speed) und Gegenseite (`Link-Audit …`) — 1-Gbps-Ursachen
-  ohne Raten.
-- **Material-Discovery gehärtet:** einmal pro Familie (statt pro Configure);
-  exakte Body-Materialnamen für SystemX (`BrushedAluminiumYellow`, `Yellow`),
-  Rest weiter per Proximity.
-- **Model-Discovery:** einmal pro Familie Hierarchy + Mesh-Namen + Renderer
-  (`Model discovery …`) als Austausch-Basis für Server-Modelle.
-- **Checkout-Farben für Mengen:** Vanilla ruft `ApplyColorToSpawnedItem` pro Spawn
-  mit stale UID — Redirect auf frischesten Checkout-Spawn; Sweep verteilt
-  Zeilen-Quantity auf aufeinanderfolgende Spawns (6× Rack → 6× Farbe).
+- **Phantom modules removed:** `ConfigurePort` no longer writes `sfpTypeInserted`
+  on empty ports (blocked real SFP+/SFP28 modules + rendered nothing).
+  Legacy damage (type set without module) resets to 0 — old saves heal.
+- **Port cap re-assert:** `CableLink.InsertSFP` postfix raises the cap to tier
+  speed once if negotiated low before (raise only, modules untouched).
+- **Link audit in Verify:** "Verify now" logs cap, cable, module (+module speed)
+  and far end per connected variant port (`Link-Audit …`) — no more guessing
+  1-Gbps causes.
+- **Material discovery hardened:** once per family (instead of per configure);
+  exact body material names for SystemX (`BrushedAluminiumYellow`, `Yellow`),
+  rest continues via proximity.
+- **Model discovery:** once per family, hierarchy + mesh names + renderers
+  (`Model discovery …`) as replacement basis for server models.
+- **Checkout colors for quantities:** vanilla calls `ApplyColorToSpawnedItem`
+  with stale UID — redirect to freshest checkout spawn; sweep spreads line
+  quantity over consecutive spawns (6× rack → 6× color).
 
 ## v2.2.3
 
