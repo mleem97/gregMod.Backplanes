@@ -6,10 +6,10 @@ using UnityEngine;
 namespace GregMod.Backplanes
 {
     /// <summary>
-    /// RGB-Streifen-Effekt: faerbt getrackte Material-Slots pro Frame mit
-    /// rotierendem Hue (voller Farbkreis, ~8 s). Nur fuer Specs mit
-    /// RgbAnimated; normale Tints bleiben statisch. Tote Server fallen
-    /// automatisch aus dem Tracking (Liveness-Check).
+    /// RGB stripe effect: tints tracked material slots per frame with
+    /// rotating hue (full color cycle, ~8 s). Only for specs with
+    /// RgbAnimated; normal tints stay static. Dead servers drop
+    /// out of tracking automatically (liveness check).
     /// </summary>
     internal static class RgbAnimator
     {
@@ -101,7 +101,7 @@ namespace GregMod.Backplanes
                     foreach (var slot in entry.Slots)
                     {
                         if (slot?.Mat == null || string.IsNullOrEmpty(slot.Prop)) continue;
-                        try { slot.Mat.SetColor(slot.Prop, col); } catch { /* Slot tot -> naechster Tick */ }
+                        try { slot.Mat.SetColor(slot.Prop, col); } catch { /* dead slot -> next tick */ }
                     }
                 }
 

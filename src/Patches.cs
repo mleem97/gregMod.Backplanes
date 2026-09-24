@@ -45,9 +45,9 @@ namespace GregMod.Backplanes
         // ------------------------------------------------------- shop triggers
 
         /// <summary>
-        /// Das Spiel rendert Kartennamen per ItemID-Lookup (Base-Namen bzw.
-        /// "Unknown" bei unseren IDs). Nach jedem Vanilla-Refresh die
-        /// Varianten-Texte neu setzen (Anzeige only, keine Logik).
+        /// Game renders card names via itemID lookup (base names or
+        /// "Unknown" for our IDs). After each vanilla refresh re-apply
+        /// variant texts (display only, no logic).
         /// </summary>
         [HarmonyPatch(typeof(ShopItem), nameof(ShopItem.Start))]
         [HarmonyPostfix]
@@ -58,7 +58,7 @@ namespace GregMod.Backplanes
                 if (__instance == null) return;
                 ApplyVariantCardTexts(__instance);
             }
-            catch { /* Anzeige only */ }
+            catch { /* display only */ }
         }
 
         [HarmonyPatch(typeof(ShopItem), nameof(ShopItem.UpdateVisualState))]
@@ -70,7 +70,7 @@ namespace GregMod.Backplanes
                 if (__instance == null) return;
                 ApplyVariantCardTexts(__instance);
             }
-            catch { /* Anzeige only */ }
+            catch { /* display only */ }
         }
 
         [HarmonyPatch(typeof(ShopItem), nameof(ShopItem.OnLoad))]
@@ -82,7 +82,7 @@ namespace GregMod.Backplanes
                 if (__instance == null) return;
                 ApplyVariantCardTexts(__instance);
             }
-            catch { /* Anzeige only */ }
+            catch { /* display only */ }
         }
 
         private static void ApplyVariantCardTexts(ShopItem item)
@@ -135,11 +135,11 @@ namespace GregMod.Backplanes
             try
             {
                 if (__instance == null) return;
-                // Hinweis: KEIN ClearPendingPurchases mehr hier. Gekaufte Items
-                // existieren physisch weiter (Spieler traegt sie / Cart), auch
-                // wenn der Shop zu ist. Wipe wuerde die Kauf->Insert-Korrelation
-                // zerstoeren. Abgelaufenes raeumt Expiry weg (10min/60s).
-                Log.Info("ComputerShop.ButtonClear gesehen (Pending bleibt erhalten).");
+                // Note: NO ClearPendingPurchases here anymore. Purchased items
+                // keep existing physically (player carries them / cart), even
+                // when shop is closed. Wipe would destroy buy->insert correlation.
+                // Expired entries cleaned by expiry (10min/60s).
+                Log.Info("ComputerShop.ButtonClear seen (pending kept).");
             }
             catch (Exception ex)
             {
@@ -154,8 +154,8 @@ namespace GregMod.Backplanes
             try
             {
                 if (__instance == null) return;
-                // Wie oben: Shop-Schliessen darf Pending NICHT loeschen,
-                // sonst ist beim spaeteren Einsetzen nichts mehr bekannt.
+                // As above: closing shop must NOT delete pending,
+                // else nothing known at later insert.
             }
             catch (Exception ex)
             {
@@ -166,11 +166,11 @@ namespace GregMod.Backplanes
         // ------------------------------------------------------- purchases
 
         /// <summary>
-        /// Varianten haben eigene Item-IDs (9001-9020). Das Spiel kennt nur
-        /// Base-Prefabs: Hier wird die Varianten-ID transparent auf die Base-ID
-        /// der Familie zurueckgemappt (ref-Parameter), damit der Original-Code
-        /// das korrekte Base-Prefab liefert. Warenkorb/Kauf behalten die
-        /// Varianten-ID (eigene Identitaet end-to-end).
+        /// Variants have own item IDs (9001-9020). Game knows only
+        /// base prefabs: here the variant ID is transparently mapped back to the
+        /// family base ID (ref param), so original code delivers
+        /// the correct base prefab. Cart/purchase keep the
+        /// variant ID (own identity end-to-end).
         /// </summary>
         [HarmonyPatch(typeof(ComputerShop), nameof(ComputerShop.GetPrefabForItem))]
         [HarmonyPrefix]
@@ -180,9 +180,9 @@ namespace GregMod.Backplanes
             try
             {
                 if (__instance == null) return true;
-                // Varianten-IDs 9001+: Pfad absichtlich sichtbar machen, wenn die
-                // Base-ID-Map unvollstaendig ist (Spawn wuerde stillschweigend
-                // scheitern - GetPrefabForItem liefert dann null).
+                // Variant IDs 9001+: keep path deliberately visible if
+                // base-ID map incomplete (spawn would silently
+                // fail - GetPrefabForItem then returns null).
                 bool isVariant = itemID >= 9001 && itemID <= 9021;
                 if (BackplanesMod.Injector.TryGetBaseId(itemID, out int baseId))
                 {
@@ -192,10 +192,10 @@ namespace GregMod.Backplanes
                 }
                 else if (isVariant)
                 {
-                    Log.Warning($"GetPrefabForItem: keine Base-ID fuer itemID={itemID} " +
-                        "(Registrierung/Reset?) - Original sieht die ID nicht, Spawn kann null liefern.");
+                    Log.Warning($"GetPrefabForItem: no base ID for itemID={itemID} " +
+                        "(registration/reset?) - original never sees the ID, spawn may return null.");
                 }
-                return true; // Original immer laufen lassen
+                return true; // always run original
             }
             catch (Exception ex)
             {
@@ -245,8 +245,8 @@ namespace GregMod.Backplanes
                 Log.Info($"[Color] SpawnPhysicalItem: prefab='{prefabName}' price={price} type={itemType} uid={(hasValue ? uid.ToString() : "null")} uniqueID={__instance.uniqueID}");
                 DumpSpawnedItems(__instance, "after SpawnPhysicalItem");
 
-                // Vanilla-Return ist unzuverlaessig (null oder falscher Key).
-                // Neuer Eintrag sitzt typischerweise unter uniqueID-1.
+                // Vanilla return unreliable (null or wrong key).
+                // New entry typically sits at uniqueID-1.
                 int resolved = -1;
                 try
                 {
@@ -280,60 +280,6 @@ namespace GregMod.Backplanes
             {
                 Log.Error("SpawnPhysicalPostfix failed.", ex);
             }
-        }
-
-        // ------------------------------------------------------- port speeds
-        // Event-driven (no polling): PortSpeedMemory holds our ports' target
-        // speeds; these postfixes re-assert on drift. Every real correction
-        // logs one line (hook, old -> new) — that IS the diagnostic showing
-        // which vanilla path rewrites speeds. No-drift calls stay silent.
-
-        [HarmonyPatch(typeof(CableLink), nameof(CableLink.SetConnectionSpeed))]
-        [HarmonyPostfix]
-        private static void CableLinkSetSpeedPostfix(CableLink __instance)
-        {
-            try
-            {
-                if (__instance == null) return;
-                PortSpeedMemory.Enforce(__instance, "SetConnectionSpeed");
-            }
-            catch { }
-        }
-
-        [HarmonyPatch(typeof(CableLink), nameof(CableLink.InsertSFP))]
-        [HarmonyPostfix]
-        private static void CableLinkInsertSFPPostfix(CableLink __instance)
-        {
-            try
-            {
-                if (__instance == null) return;
-                PortSpeedMemory.Enforce(__instance, "InsertSFP");
-            }
-            catch { }
-        }
-
-        [HarmonyPatch(typeof(CableLink), nameof(CableLink.InteractOnClick))]
-        [HarmonyPostfix]
-        private static void CableLinkInteractPostfix(CableLink __instance)
-        {
-            try
-            {
-                if (__instance == null) return;
-                PortSpeedMemory.Enforce(__instance, "InteractOnClick");
-            }
-            catch { }
-        }
-
-        [HarmonyPatch(typeof(CableLink), nameof(CableLink.SecondActionOnClick))]
-        [HarmonyPostfix]
-        private static void CableLinkSecondActionPostfix(CableLink __instance)
-        {
-            try
-            {
-                if (__instance == null) return;
-                PortSpeedMemory.Enforce(__instance, "SecondActionOnClick");
-            }
-            catch { }
         }
 
         [HarmonyPatch(typeof(ComputerShop), "SpawnAllPurchasedItems")]
@@ -398,11 +344,11 @@ namespace GregMod.Backplanes
                 Log.Info($"[Color] SpawnAllPurchasedItems: END uniqueID={__instance.uniqueID}");
                 DumpSpawnedItems(__instance, "after spawn-all");
 
-                // Vanilla wendet oft nur das erste Custom-Color-Item an (bzw.
-                // SpawnPhysicalItem liefert kaputte UIDs). Nachziehen: alle
-                // Custom-Color-Cart-Eintraege der Spawn-Reihenfolge zuordnen.
-                // Zeile mit Quantity Q belegt Q aufeinanderfolgende Spawns ab
-                // ihrem Unit-Offset (kumulierte Mengen aller Zeilen davor).
+                // Vanilla often applies only the first custom-color item (or
+                // SpawnPhysicalItem returns broken UIDs). Catch up: map all
+                // custom-color cart entries to spawn order.
+                // Line with quantity Q occupies Q consecutive spawns from
+                // its unit offset (cumulated quantities of all lines before).
                 int spawned = _checkoutSpawnUids.Count;
                 int colored = 0, forced = 0;
                 for (int i = 0; i < _checkoutColors.Count; i++)
@@ -414,7 +360,7 @@ namespace GregMod.Backplanes
                         int spawnIdx = offset + j;
                         if (spawnIdx >= spawned)
                         {
-                            Log.Warning($"[Color] checkout sweep: custom[{i}] unit {j} hat keinen Spawn (offset={offset}, spawned={spawned})");
+                            Log.Warning($"[Color] checkout sweep: custom[{i}] unit {j} has no spawn (offset={offset}, spawned={spawned})");
                             break;
                         }
                         int uid = _checkoutSpawnUids[spawnIdx];
@@ -423,7 +369,7 @@ namespace GregMod.Backplanes
                             colored++;
                             continue;
                         }
-                        Log.Info($"[Color] checkout sweep: custom[{i}] unit {j} spawnIdx={spawnIdx} uid={uid} nicht von Vanilla gefaerbt → force");
+                        Log.Info($"[Color] checkout sweep: custom[{i}] unit {j} spawnIdx={spawnIdx} uid={uid} not vanilla-colored → force");
                         ForceApplyColorToUid(__instance, uid, _checkoutColors[i], _checkoutTypes[i]);
                         forced++;
                     }
@@ -472,9 +418,9 @@ namespace GregMod.Backplanes
             catch (Exception ex) { Log.Warning("DumpSpawnedItems failed: " + ex.Message); }
         }
 
-        // ------------------------------------------------------- color flow (ISSUE-004 diagnose)
+        // ------------------------------------------------------- color flow (ISSUE-004 diagnostics)
 
-        /// <summary>Checkout-Tracking: Custom-Color-Cart-Eintraege + Spawn-Reihenfolge + bereits gefaerbte UIDs.</summary>
+        /// <summary>Checkout tracking: custom-color cart entries + spawn order + already colored UIDs.</summary>
         private static readonly System.Collections.Generic.List<Color> _checkoutColors = new();
         private static readonly System.Collections.Generic.List<PlayerManager.ObjectInHand> _checkoutTypes = new();
         private static readonly System.Collections.Generic.List<int> _checkoutCartIndexes = new();
@@ -608,10 +554,10 @@ namespace GregMod.Backplanes
                 if (__instance == null) return;
                 int requested = uid;
                 int resolved = ResolveSpawnedUid(__instance, uid);
-                // Checkout: Vanilla ruft pro Spawn mit stale UID (z.B. immer 1).
-                // Frischester Spawn des laufenden Checkouts ist das wahre Ziel —
-                // auch bei Exact-Hit (Key kann ein stale Rest frueherer
-                // Checkouts sein, spawnedItems wird nie geleert).
+                // Checkout: vanilla calls per spawn with stale UID (e.g. always 1).
+                // Freshest spawn of running checkout is the real target —
+                // even on exact hit (key may be a stale leftover of earlier
+                // checkouts, spawnedItems is never cleared).
                 if (_checkoutActive && _checkoutSpawnUids.Count > 0)
                 {
                     try
@@ -619,11 +565,11 @@ namespace GregMod.Backplanes
                         int last = _checkoutSpawnUids[_checkoutSpawnUids.Count - 1];
                         if (__instance.spawnedItems != null && __instance.spawnedItems.ContainsKey(last) && last != resolved)
                         {
-                            Log.Info($"[Color] ApplyColor uid checkout-redirect: requested={requested} -> {last} (frischester Spawn)");
+                            Log.Info($"[Color] ApplyColor uid checkout-redirect: requested={requested} -> {last} (freshest spawn)");
                             resolved = last;
                         }
                     }
-                    catch { /* fallback unten */ }
+                    catch { /* fallback below */ }
                 }
                 if (resolved != uid)
                 {
@@ -641,9 +587,9 @@ namespace GregMod.Backplanes
         }
 
         /// <summary>
-        /// Vanilla SpawnPhysicalItem speichert unter Key N, erhoeht uniqueID aber auf N+1
-        /// und ruft ApplyColorToSpawnedItem mit dem post-increment-Wert auf → Lookup-Miss.
-        /// Bevorzugt den exakten Key, sonst uniqueID-1, sonst den passenden vorhandenen Key.
+        /// Vanilla SpawnPhysicalItem stores under key N, but bumps uniqueID to N+1
+        /// and calls ApplyColorToSpawnedItem with the post-increment value → lookup miss.
+        /// Prefer exact key, else uniqueID-1, else matching existing key.
         /// </summary>
         private static int ResolveSpawnedUid(ComputerShop shop, int uid)
         {
@@ -656,7 +602,7 @@ namespace GregMod.Backplanes
                 if (minus >= 0 && dict.ContainsKey(minus)) return minus;
                 int plus = uid + 1;
                 if (dict.ContainsKey(plus)) return plus;
-                // Fallback: einziger Eintrag, falls uniqueID komplett daneben liegt
+                // Fallback: single entry, if uniqueID fully off
                 if (dict.Count == 1)
                 {
                     foreach (var k in dict.Keys) return k;
@@ -686,8 +632,8 @@ namespace GregMod.Backplanes
         }
 
         /// <summary>
-        /// Wenn der Vanilla-Lookup/Apply trotz korrekter UID die Farbe nicht gesetzt hat
-        /// (Material noch Spawn-Default-Grau / rgbColor leer), Farbe erneut ziehen.
+        /// If vanilla lookup/apply did not set the color despite correct UID
+        /// (material still spawn-default gray / rgbColor empty), pull color again.
         /// </summary>
         private static void ForceApplyColorIfStillDefault(ComputerShop shop, int uid, Color color,
             PlayerManager.ObjectInHand itemType)
@@ -743,9 +689,9 @@ namespace GregMod.Backplanes
         }
 
         /// <summary>
-        /// Checkout-Sweep: Farbe anziehen, auch wenn Vanilla nie gerufen hat
-        /// (nur erster Custom-Item im Cart). Zieht erst den Default-Check,
-        /// sonst unbedingt.
+        /// Checkout sweep: pull color even if vanilla never called
+        /// (only first custom item in cart). Runs default check first,
+        /// else unconditional.
         /// </summary>
         private static void ForceApplyColorToUid(ComputerShop shop, int uid, Color color,
             PlayerManager.ObjectInHand itemType)
@@ -862,8 +808,8 @@ string goName = "?";
         // ------------------------------------------------------- server lifecycle
 
         /// <summary>
-        /// Nach Checkout SOFORT drainen (nicht auf 1/s-Tick warten): Der Spawn
-        /// ist dann garantiert registriert - Tint sitzt direkt nach dem Kauf.
+        /// Drain IMMEDIATELY after checkout (no wait for 1/s tick): spawn
+        /// is then guaranteed registered - tint lands right after purchase.
         /// </summary>
         [HarmonyPatch(typeof(ComputerShop), nameof(ComputerShop.ButtonCheckOut))]
         [HarmonyPostfix]
@@ -1035,8 +981,8 @@ string goName = "?";
         }
 
         /// <summary>
-        /// Modul eingesteckt: Port-Cap ggf. einmalig auf Tier-Speed anheben
-        /// (falls vorher niedrig verhandelt). Nur anheben, nie Module anfassen.
+        /// Module inserted: raise port cap once to tier speed if needed
+        /// (if previously negotiated low). Only raise, never touch modules.
         /// </summary>
         [HarmonyPatch(typeof(CableLink), nameof(CableLink.InsertSFP))]
         [HarmonyPostfix]

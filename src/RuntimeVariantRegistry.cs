@@ -71,7 +71,7 @@ namespace GregMod.Backplanes
             lock (_sync) EnsureLoadedLocked();
         }
 
-        /// <summary>Serialisiert Marker fuer Sidecar-Ablage (GregSaveGuard).</summary>
+        /// <summary>Serializes markers for sidecar storage (GregSaveGuard).</summary>
         internal string Serialize()
         {
             lock (_sync)
@@ -85,7 +85,7 @@ namespace GregMod.Backplanes
             }
         }
 
-        /// <summary>Laedt Marker aus Sidecar-Content (GregSaveGuard).</summary>
+        /// <summary>Loads markers from sidecar content (GregSaveGuard).</summary>
         internal void Deserialize(string content)
         {
             if (string.IsNullOrWhiteSpace(content)) return;

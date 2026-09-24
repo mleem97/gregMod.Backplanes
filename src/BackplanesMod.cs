@@ -4,7 +4,7 @@ using MelonLoader;
 using UnityEngine;
 using UnityEngine.InputSystem;
 
-[assembly: MelonInfo(typeof(GregMod.Backplanes.BackplanesMod), "gregMod.Backplanes", "2.2.3", "TeamGreg Modding")]
+[assembly: MelonInfo(typeof(GregMod.Backplanes.BackplanesMod), "gregMod.Backplanes", "2.3.0", "TeamGreg Modding")]
 [assembly: MelonGame("Waseku", "Data Center")]
 
 namespace GregMod.Backplanes
@@ -71,7 +71,7 @@ namespace GregMod.Backplanes
     }
 
     /// <summary>
-    /// gregMod.Backplanes v2.2.3 — refactored successor of BackplaneBoostServers v1.0.1.
+    /// gregMod.Backplanes v2.3.0 — refactored successor of BackplaneBoostServers v1.0.1.
     ///
     /// 20 high-IOPS backplane server variants (SystemX / RISC / Mainframe / GPU ×
     /// 100K/500K/1M/2M/4M) with bandwidth tiers aligned to gregMod.MoreModules
@@ -92,7 +92,7 @@ namespace GregMod.Backplanes
             {
                 Instance = this;
                 ModConfig.Load();
-                Log.Info("Initializing gregMod.Backplanes v2.2.3 (refactored from BackplaneBoostServers v1.0.1).");
+                Log.Info("Initializing gregMod.Backplanes v2.3.0 (refactored from BackplaneBoostServers v1.0.1).");
                 Log.Info($"Press {ModConfig.ToggleKey} for the Backplanes panel.");
                 Patches.Apply(HarmonyInstance);
                 if (GregHost.HasCore)
@@ -104,7 +104,7 @@ namespace GregMod.Backplanes
                 }
                 else
                 {
-                    Log.Info("Standalone-Modus (ohne gregCore): Basisfunktionen.");
+                    Log.Info("Standalone mode (no gregCore): base features.");
                 }
             }
             catch (Exception ex)
@@ -114,8 +114,8 @@ namespace GregMod.Backplanes
         }
 
         /// <summary>
-        /// Marker-Sidecar ueber GregSaveGuard: reist mit dem Savegame mit
-        /// (greg_backplanes.&lt;save&gt;.tsv neben den Saves), ohne Mod inert.
+        /// Marker sidecar via GregSaveGuard: travels with savegame
+        /// (greg_backplanes.&lt;save&gt;.tsv next to saves), inert without mod.
         /// </summary>
         private static void RegisterSaveSidecar()
         {
@@ -128,7 +128,7 @@ namespace GregMod.Backplanes
             }
             catch (Exception ex)
             {
-                Log.Error("Save-Sidecar-Registrierung fehlgeschlagen.", ex);
+                Log.Error("Save sidecar registration failed.", ex);
             }
         }
 
@@ -160,7 +160,7 @@ namespace GregMod.Backplanes
             // Click routing for the panel (fallback when no EventSystem delivers).
             try { BackplanesOverlay.RouteClicks(); } catch (Exception ex) { Log.Error("Click routing failed.", ex); }
 
-            // RGB-Streifen: Hue-Rotation für getrackte Titan-Materialien.
+            // RGB stripe: hue rotation for tracked titan materials.
             try { RgbAnimator.Tick(); } catch (Exception ex) { Log.Error("RGB tick failed.", ex); }
 
             try
@@ -238,7 +238,7 @@ namespace GregMod.Backplanes
             try
             {
                 gregCore.Core.Mods.GregModRegistry.Register(
-                    "gregMod.Backplanes", "Backplanes", "2.2.3",
+                    "gregMod.Backplanes", "Backplanes", "2.3.0",
                     new string[] { "backplanes" });
             }
             catch (Exception ex)
@@ -247,17 +247,17 @@ namespace GregMod.Backplanes
             }
         }
 
-        // Spieler-sichtbare Warnung via gregCore (z.B. Checkout-Verify bei
-        // Bulk-Kaeufen). Nur bei HasCore aufrufen (eigene Methode wegen
-        // JIT-Trennung ohne gregCore-DLL).
+        // Player-visible warning via gregCore (e.g. checkout verify on
+        // bulk purchases). Call only with HasCore (own method for
+        // JIT split without gregCore DLL).
         internal static void NotifyCore(string message)
         {
             try { gregCore.UI.GregNotificationManager.Show(message, 5f); }
             catch (Exception ex) { Log.Warning("NotifyCore failed: " + ex.GetBaseException().Message); }
         }
 
-        // Tasten-HUD (rechter Rand) + Oeffner fuers F1-Hub. Nur mit gregCore
-        // aufrufen (eigene Methode wegen JIT-Trennung ohne gregCore-DLL).
+        // Key HUD (right edge) + opener for F1 hub. Call only with gregCore
+        // (own method for JIT split without gregCore DLL).
         private static void RegisterHudAndOpener()
         {
             try

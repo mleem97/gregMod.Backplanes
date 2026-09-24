@@ -35,9 +35,9 @@ namespace GregMod.Backplanes
         internal int Iops;
         internal int Price;
         internal int XpToUnlock;
-        /// <summary>Eigene Item-ID der Variante. Fix vergeben (9001+), zur
-        /// Registrierung auf Kollision mit Vanilla-IDs geprueft. Kollidiert nicht
-        /// mit gregMod.MoreModules (MOD/BULK/TRAY_ID_BASE 1000/2000/3000).</summary>
+        /// <summary>Own item ID of the variant. Fixed (9001+), checked
+        /// against collisions with vanilla IDs. No collision
+        /// with gregMod.MoreModules (MOD/BULK/TRAY_ID_BASE 1000/2000/3000).</summary>
         internal int VariantItemId;
         internal string ConnectorHint;
         internal float NetworkSpeedGbps;
@@ -59,7 +59,7 @@ namespace GregMod.Backplanes
         /// <summary>Visual Y scale: 4/3 for 3U-based, 8/7 for 7U-based variants. Visual only.</summary>
         internal float ScaleY;
 
-        /// <summary>RGB-Streifen: Hue rotiert dauerhaft (RgbAnimator), statt statischem Tint.</summary>
+        /// <summary>RGB stripe: hue rotates permanently (RgbAnimator), not static tint.</summary>
         internal bool RgbAnimated;
 
         internal string IopsText => Iops.ToString(CultureInfo.InvariantCulture);
@@ -72,7 +72,7 @@ namespace GregMod.Backplanes
 
         internal string BaseRuntimeToken => BaseAssetName.Replace("ShopItemSO_", string.Empty, StringComparison.Ordinal);
 
-        /// <summary>Persistenz-/Match-Key aus der IOPS-Stufe (100k/500k/1m/2m/4m).</summary>
+        /// <summary>Persistence/match key from IOPS tier (100k/500k/1m/2m/4m).</summary>
         internal string SizeKey
         {
             get
@@ -251,7 +251,7 @@ namespace GregMod.Backplanes
                 4000000, 1000000, 200000, 9020, "QSFP-DD", 400f, 3, 4, "QSFP-DD 400G",
                 new Color(0.95f, 1.00f, 0.60f, 1f), green, small: false));
 
-            // ---- Titan (Custom): 4 TBit, beide Ports, RGB-Streifen ----
+            // ---- Titan (custom): 4 TBit, both ports, RGB stripe ----
             list.Add(Make("titan", "GPU 3U 5000 IOPS", "ShopItemSO_Server_Green1",
                 "GPU 7U 12000 IOPS", "ShopItemSO_Server_Green2", "Titan",
                 40000000, 10000000, 2000000, 9021, "QSFP-DD", 4000f, 3, 4, null,

@@ -35,17 +35,17 @@ namespace GregMod.Backplanes
             "window", "door",
         };
 
-        // Plausibilitaet: Ein einzelner Server hat nur eine Handvoll Renderer.
-        // Deutlich mehr deutet auf ein falsches Root-Objekt (Raum/Rack-Reihe)
-        // hin - dann lieber nichts anfasssen als die Szene umfaerben.
+        // Plausibility: a single server has only a handful of renderers.
+        // Clearly more hints at a wrong root object (room/rack row)
+        // - then rather touch nothing than recolor the scene.
         private const int MaxRenderersForTint = 24;
 
         private static readonly string[] FamilyColorWords = { "yellow", "blue", "purple", "green" };
 
-        // Exakte Body-Materialnamen je Familie (aus Live-Discovery, 18:46-Log).
-        // Klein geschrieben, ohne " (Instance)"-Suffix vergleichen. Familien
-        // ohne Eintrag fallen auf Proximity-Matching zurueck; sobald deren
-        // Discovery-Zeile im Log steht, hier nachtragen.
+        // Exact body material names per family (from live discovery, 18:46 log).
+        // Compare lowercase, without " (Instance)" suffix. Families
+        // without entry fall back to proximity matching; once their
+        // discovery line is in the log, add it here.
         private static readonly Dictionary<string, string[]> ExactBodyMaterials =
             new Dictionary<string, string[]>(StringComparer.OrdinalIgnoreCase)
             {
@@ -88,15 +88,15 @@ namespace GregMod.Backplanes
                 try { root = server.gameObject; } catch { /* best-effort */ }
                 if (root == null) return;
 
-                // Plausibilitaet: zu viele Renderer = falsches Root (Raum statt
-                // Server). Weder skalieren noch faerben in dem Fall.
+                // Plausibility: too many renderers = wrong root (room instead
+                // of server). Neither scale nor tint in that case.
                 try
                 {
                     var all = root.GetComponentsInChildren<Renderer>(true);
                     if (all != null && all.Length > MaxRenderersForTint)
                     {
-                        Log.Warning($"Visuals {spec.VariantDisplayName} uebersprungen: {all.Length} Renderer " +
-                            $"unter '{root.name}' (kein einzelner Server?).");
+                        Log.Warning($"Visuals {spec.VariantDisplayName} skipped: {all.Length} renderers " +
+                            $"under '{root.name}' (not a single server?).");
                         lock (Sync) AppliedByPointer[ptr] = wantKey;
                         return;
                     }
@@ -158,15 +158,15 @@ namespace GregMod.Backplanes
             if (renderers == null) return;
             if (renderers.Length > MaxRenderersForTint)
             {
-                Log.Warning($"Tint {spec.VariantDisplayName} uebersprungen: {renderers.Length} Renderer " +
-                    $"unter '{root.name}' (kein einzelner Server?).");
+                Log.Warning($"Tint {spec.VariantDisplayName} skipped: {renderers.Length} renderers " +
+                    $"under '{root.name}' (not a single server?).");
                 return;
             }
 
-            // Diagnose einmal pro Familie (nicht pro Configure): Die Namen sind
-            // pro Familie stabil, jede weitere Zeile waere Spam. Modelle UND
-            // Materialien: Das Modell-Inventar zeigt, woraus der Server besteht
-            // (Austausch-Basis), die Materialien dienen dem Tint-Matching.
+            // Diagnostics once per family (not per configure): names are
+            // stable per family, any further line would be spam. Models AND
+            // materials: model inventory shows what the server is made of
+            // (replacement base), materials serve tint matching.
             lock (Sync)
             {
                 if (DiscoveryLogged.Add(spec.FamilyKey))
@@ -199,8 +199,8 @@ namespace GregMod.Backplanes
 
                     if (IsExcluded(matName)) continue;
 
-                    // Fallback-Kandidat: groesstes nicht-exkludiertes Mesh
-                    // (Body ist praktisch immer das groesste Teil).
+                    // Fallback candidate: largest non-excluded mesh
+                    // (body is practically always the largest part).
                     try
                     {
                         float size = rend.bounds.size.magnitude;
@@ -235,7 +235,7 @@ namespace GregMod.Backplanes
                 }
             }
 
-            // Fallback: nichts passte per Name/Naehe -> groesstes Mesh faerben.
+            // Fallback: nothing matched by name/proximity -> tint largest mesh.
             if (tinted == 0 && fallbackRend != null)
             {
                 try
@@ -261,20 +261,20 @@ namespace GregMod.Backplanes
                         if (tinted > 0)
                         {
                             try { fallbackRend.materials = mats; } catch { }
-                            Log.Info($"Tint-Fallback {spec.VariantDisplayName}: groesstes Mesh '{mat.name}' gefaerbt.");
+                            Log.Info($"Tint fallback {spec.VariantDisplayName}: largest mesh '{mat.name}' tinted.");
                         }
                     }
                 }
                 catch (Exception ex)
                 {
-                    Log.Warning($"Tint-Fallback {spec.VariantDisplayName} fehlgeschlagen: {ex.Message}");
+                    Log.Warning($"Tint fallback {spec.VariantDisplayName} failed: {ex.Message}");
                 }
             }
 
             if (tinted > 0)
                 Log.Info($"Tinted {tinted} material slot(s) for {spec.VariantDisplayName} -> {spec.TintColor}.");
             else
-                Log.Warning($"Tint {spec.VariantDisplayName}: kein Material passte (siehe discovery oben).");
+                Log.Warning($"Tint {spec.VariantDisplayName}: no material matched (see discovery above).");
 
             try
             {
@@ -286,7 +286,7 @@ namespace GregMod.Backplanes
 
         private static bool ShouldTint(Material mat, string matName, ServerVariantSpec spec)
         {
-            // Exakter Treffer zuerst (deterministisch, kein Raten).
+            // Exact hit first (deterministic, no guessing).
             try
             {
                 string norm = matName ?? "";
@@ -301,7 +301,7 @@ namespace GregMod.Backplanes
                     }
                 }
             }
-            catch { /* fallback unten */ }
+            catch { /* fallback below */ }
             string lower = matName.ToLowerInvariant();
             foreach (var word in FamilyColorWords)
             {
@@ -333,9 +333,9 @@ namespace GregMod.Backplanes
         }
 
         /// <summary>
-        /// Modell-Inventar: Hierarchie-Pfade + Mesh-Namen + Renderer-Bestueckung.
-        /// Zeigt, aus welchen Modellen/Assets ein Server besteht (Austausch-Basis).
-        /// Begrenzt auf 64 Knoten / Tiefe 6 — Server sind flach, Racks/Raeume nicht.
+        /// Model inventory: hierarchy paths + mesh names + renderer loadout.
+        /// Shows which models/assets a server is made of (replacement base).
+        /// Capped at 64 nodes / depth 6 — servers are flat, racks/rooms are not.
         /// </summary>
         private static string DescribeModels(GameObject root)
         {
@@ -343,7 +343,7 @@ namespace GregMod.Backplanes
             try
             {
                 var queue = new System.Collections.Generic.Queue<(Transform t, int depth, string path)>();
-                if (root == null || root.transform == null) return "<kein root>";
+                if (root == null || root.transform == null) return "<no root>";
                 queue.Enqueue((root.transform, 0, root.name ?? "?"));
                 while (queue.Count > 0 && parts.Count < 64)
                 {

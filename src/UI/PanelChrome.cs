@@ -6,9 +6,9 @@ using GregMod.Backplanes;
 
 namespace GregMod.Backplanes;
 
-// Panel-Chrome hinter Interface: mit gregCore (GregPanel: Slide/Drag/
-// Registry) oder standalone (eigene UIDocument, sofort sichtbar, Drag).
-// Aufrufer duerfen NUR das Interface anfassen (JIT-Sicherheit ohne DLL).
+// Panel chrome behind interface: with gregCore (GregPanel: slide/drag/
+// registry) or standalone (own UIDocument, instantly visible, drag).
+// Callers must ONLY touch the interface (JIT safety without DLL).
 public interface IPanelChrome
 {
     VisualElement Root { get; }
@@ -98,7 +98,7 @@ public static class PanelChromeFactory
         public void Tick() { /* Slide/Drag treibt die zentrale Registry */ }
     }
 
-    // --- Standalone-Implementierung (keine gregCore-Typen!) ---
+    // --- Standalone implementation (no gregCore types!) ---
     private sealed class LocalChrome : IPanelChrome
     {
         private VisualElement _root;
@@ -204,7 +204,7 @@ public static class PanelChromeFactory
             }
             catch (Exception ex)
             {
-                MelonLogger.Warning("[Backplanes] Panel-Rebuild fehlgeschlagen: " + ex.Message);
+                MelonLogger.Warning("[Backplanes] Panel rebuild failed: " + ex.Message);
             }
         }
 

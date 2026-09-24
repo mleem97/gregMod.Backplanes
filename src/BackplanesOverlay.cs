@@ -6,10 +6,10 @@ using UnityEngine.UIElements;
 
 namespace GregMod.Backplanes
 {
-    // UI-Toolkit-Panel auf gregCores Layer-Root, wie gregMod.MusicPlayer:
-    // GregPanel (LockCamera/LockMovement/LockInteract/ShowCursor) + manuelles
-    // Klick-Routing als Fallback fuers fehlende EventSystem, explicite
-    // Action<ClickEvent>-Callbacks (IL2CPP-Regel), Game-Font via GregFontLoader.
+    // UI Toolkit panel on gregCore layer root, like gregMod.MusicPlayer:
+    // GregPanel (LockCamera/LockMovement/LockInteract/ShowCursor) + manual
+    // click routing as fallback for missing EventSystem, explicit
+    // Action<ClickEvent> callbacks (IL2CPP rule), game font via GregFontLoader.
     public static class BackplanesOverlay
     {
         private sealed class Clickable
@@ -45,9 +45,9 @@ namespace GregMod.Backplanes
         }
     }
 
-    // Separate Methode (JIT-Trennung): beruehrt gregCore-Typen und wird nur
-    // aufgerufen, wenn GregHost.HasCore true ist. Meldet den Panel-Status ans
-    // F1-Hub (GregMenuRegistry), damit Offen/Zu + Schliessen stimmen.
+    // Separate method (JIT split): touches gregCore types and is only
+    // called when GregHost.HasCore is true. Reports panel state to
+    // F1 hub (GregMenuRegistry) so open/close state stays correct.
     private static void ReportOpenState()
     {
         try { gregCore.UI.GregMenuRegistry.SetOpen("backplanes", IsVisible); } catch { /* best-effort */ }
@@ -66,8 +66,8 @@ namespace GregMod.Backplanes
             }
         }
 
-        // Jeden Frame aus Mod.OnUpdate: leitet Mausklicks an sichtbare Buttons
-        // weiter (Ersatz fuers fehlende EventSystem).
+        // Every frame from mod OnUpdate: forwards mouse clicks to visible buttons
+        // (replacement for missing EventSystem).
         public static void RouteClicks()
         {
             if (!IsVisible || _clickables.Count == 0) return;
@@ -240,8 +240,8 @@ namespace GregMod.Backplanes
             return l;
         }
 
-        // Toolkit-Default-Font ist im IL2CPP-Build unbrauchbar (Text unsichtbar).
-        // Daher Spiel-Font aus gregCore zuweisen (wie MusicPlayer).
+        // Toolkit default font is unusable in IL2CPP builds (invisible text).
+        // So assign game font from gregCore (like MusicPlayer).
         private static Font CoreFont()
         {
             return gregCore.UI.GregFontLoader.DefaultUGUIFont;

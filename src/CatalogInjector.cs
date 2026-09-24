@@ -49,17 +49,17 @@ namespace GregMod.Backplanes
         private readonly HashSet<string> _registeredIds =
             new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
-        // Varianten-ItemID (9001-9020) -> Base-ItemID (fuer GetPrefabForItem-Mapping).
+        // Variant item ID (9001-9020) -> base item ID (for GetPrefabForItem mapping).
         private readonly Dictionary<int, int> _variantToBaseId = new Dictionary<int, int>();
 
         // Pending purchases awaiting rack insertion (bounded, expiring).
         private readonly Queue<PendingInsertion> _pendingInsertions = new Queue<PendingInsertion>();
 
-        // Checkout-Snapshot: exakte Spec pro Unit in Cart-Reihenfolge.
-        // Ueberlebt Bulk-Kaeufe (30+ Units, gemischte Preispunkte), wo der
-        // reine Preis-Peek (PeekPendingSpecForSpawn) mehrdeutig waere.
-        // Wird im SpawnAll-Prefix aufgebaut und pro SpawnPhysicalItem
-        // genau einmal konsumiert; VerifyCheckout meldet Abweichungen.
+        // Checkout snapshot: exact spec per unit in cart order.
+        // Survives bulk buys (30+ units, mixed price points) where
+        // pure price peek (PeekPendingSpecForSpawn) would be ambiguous.
+        // Built in SpawnAll prefix and consumed exactly once per SpawnPhysicalItem;
+        // VerifyCheckout reports mismatches.
         private readonly Queue<ServerVariantSpec> _checkoutSpecQueue = new Queue<ServerVariantSpec>();
         private int _checkoutExpectedUnits;
         private int _checkoutVariantSpawned;
@@ -67,8 +67,8 @@ namespace GregMod.Backplanes
         // Spawn uid -> spec (correlated via ComputerShop.spawnedItems).
         private readonly Dictionary<int, ServerVariantSpec> _spawnedSpecsByUid = new Dictionary<int, ServerVariantSpec>();
 
-        // Spawn uid -> Erstellzeitpunkt: verwaiste UIDs laufen nach 60 s aus,
-        // damit der 1/sec-Sweep nicht dauerhaft weiterlaeuft (Lag/Repair-Loop).
+        // Spawn uid -> creation time: orphaned UIDs expire after 60 s,
+        // so the 1/sec sweep does not run forever (lag/repair loop).
         private readonly Dictionary<int, DateTime> _spawnedUidCreatedAt = new Dictionary<int, DateTime>();
 
         // Native server pointer -> spec, recorded at spawn-configure time.
@@ -85,10 +85,10 @@ namespace GregMod.Backplanes
         private bool _shopDumped;
         private int _sweepRepaired;
 
-        // Watchlist: erfolgreich konfigurierte Varianten-Server. Wird alle 5 s
-        // geprueft (auch ausserhalb des Repair-Fensters): Falls das Spiel Werte
-        // nachtraeglich zuruecksetzt, wird sofort neu konfiguriert + geloggt.
-        // Managed Wrapper halten (zerstoerte werfen beim Zugriff -> aussortieren).
+        // Watchlist: successfully configured variant servers. Checked every 5 s
+        // (also outside repair window): if game resets values
+        // afterwards, reconfigure immediately + log.
+        // Hold managed wrappers (destroyed ones throw on access -> drop).
         private static readonly List<(IntPtr ptr, Server server, ServerVariantSpec spec)> _watched =
             new List<(IntPtr, Server, ServerVariantSpec)>();
         private static DateTime _lastWatchAt = DateTime.MinValue;
@@ -143,7 +143,7 @@ namespace GregMod.Backplanes
 
         internal int RegisteredCount => _registeredIds.Count;
         internal int RepairedCount => _sweepRepaired;
-        internal string LastVerifySummary { get; private set; } = "Verify: noch nicht gelaufen.";
+        internal string LastVerifySummary { get; private set; } = "Verify: not run yet.";
         internal int LastVerifyOk { get; private set; }
         internal int LastVerifyMismatch { get; private set; }
         internal int LastVerifyUnknown { get; private set; }
@@ -180,13 +180,13 @@ namespace GregMod.Backplanes
         {
             try
             {
-                // Watchlist laeuft IMMER (alle 5 s, intern gedrosselt): So wird
-                // sichtbar wenn das Spiel Werte zuruecksetzt - und sofort
-                // repariert, egal in welchem Fenster wir sind.
-                try { TickWatchlist(); } catch (Exception ex) { Log.Warning("Watchlist-Tick: " + ex.Message); }
-                // Pending-Kaeufe halten den Sweep am Leben (auch ausserhalb des
-                // Fensters): frisch gekaufte Varianten konvergieren so immer,
-                // selbst wenn das Insert-Event verpasst wurde.
+                // Watchlist ALWAYS runs (every 5 s, internally throttled): this makes
+                // visible when game resets values - and immediately
+                // repairs, no matter which window we are in.
+                try { TickWatchlist(); } catch (Exception ex) { Log.Warning("Watchlist tick: " + ex.Message); }
+                // Pending purchases keep sweep alive (also outside
+                // window): freshly bought variants always converge,
+                // even if the insert event was missed.
                 bool hasPending = _pendingInsertions.Count > 0 || _spawnedSpecsByUid.Count > 0;
                 if (!InRepairWindow && !hasPending)
                 {
@@ -232,9 +232,9 @@ namespace GregMod.Backplanes
         // ------------------------------------------------------- shop registration
 
         /// <summary>
-        /// Schreibt Varianten-Texte auf ALLE Shopkarten (nach Vanilla-Refresh).
-        /// Das Spiel rendert Namen per eigenem ID-Lookup darueber - daher nach
-        /// jedem Oeffnen erneut setzen, nicht nur beim Klonen.
+        /// Writes variant texts to ALL shop cards (after vanilla refresh).
+        /// Game renders names via its own ID lookup on top - so re-apply after
+        /// every open, not just at clone time.
         /// </summary>
         internal void RefreshVariantCardTexts(string source, ComputerShop shop)
         {
@@ -257,17 +257,17 @@ namespace GregMod.Backplanes
                     fixed_++;
                 }
                 if (fixed_ > 0)
-                    Log.Info($"Kartentexte erneuert ({source}): {fixed_} Variante(n).");
+                    Log.Info($"Card texts refreshed ({source}): {fixed_} variant(s).");
             }
             catch (Exception ex)
             {
-                Log.Warning("Kartentext-Refresh fehlgeschlagen: " + ex.Message);
+                Log.Warning("Card text refresh failed: " + ex.Message);
             }
         }
 
         /// <summary>
-        /// Diagnostik: loggt Live-Werte aller Shopkarten (Anzeige-/SO-/Preis-Name),
-        /// um zu sehen was das Spiel wirklich rendert.
+        /// Diagnostics: logs live values of all shop cards (display/SO/price names),
+        /// to see what the game really renders.
         /// </summary>
         private static void DumpShopItems(string source, ComputerShop shop)
         {
@@ -277,7 +277,7 @@ namespace GregMod.Backplanes
                 if (items == null) return;
                 int n = 0;
                 try { n = items.Length; } catch { return; }
-                Log.Info($"Shop-Dump ({source}): {n} Eintraege.");
+                Log.Info($"Shop dump ({source}): {n} entries.");
                 int shown = 0;
                 for (int i = 0; i < n && shown < 64; i++)
                 {
@@ -290,14 +290,14 @@ namespace GregMod.Backplanes
                     try { soName = si.shopItemSO != null ? si.shopItemSO.itemName ?? "" : ""; } catch { }
                     try { price = si.shopItemSO != null ? si.shopItemSO.price : -1; } catch { }
                     try { xp = si.shopItemSO != null ? si.shopItemSO.xpToUnlock : -1; } catch { }
-                    try { txt = si.txtName != null ? si.txtName.text ?? "" : "(kein txtName)"; } catch { txt = "(txtName-Fehler)"; }
-                    Log.Info($"  Karte {i}: disp='{disp}' | SO='{soName}' | txt='{txt}' | {price}$ / {xp}xp");
+                    try { txt = si.txtName != null ? si.txtName.text ?? "" : "(no txtName)"; } catch { txt = "(txtName error)"; }
+                    Log.Info($"  Card {i}: disp='{disp}' | SO='{soName}' | txt='{txt}' | {price}$ / {xp}xp");
                     shown++;
                 }
             }
             catch (Exception ex)
             {
-                Log.Warning("Shop-Dump fehlgeschlagen: " + ex.Message);
+                Log.Warning("Shop dump failed: " + ex.Message);
             }
         }
 
@@ -306,8 +306,8 @@ namespace GregMod.Backplanes
             try
             {
                 if (shop == null || shop.shopItems == null) return;
-                // Dump nur bei echtem Shop-Oeffnen (Scene-Load ist zu frueh:
-                // Karten noch unbefuellt). Einmal pro Szene.
+                // Dump only on real shop open (scene load is too early:
+                // cards still unfilled). Once per scene.
                 bool isShopOpen = source.IndexOf("Shop", StringComparison.OrdinalIgnoreCase) >= 0
                     || source.IndexOf("Interact", StringComparison.OrdinalIgnoreCase) >= 0;
                 if (isShopOpen && !_shopDumped)
@@ -315,9 +315,9 @@ namespace GregMod.Backplanes
                     _shopDumped = true;
                     DumpShopItems(source, shop);
                 }
-                // Kartentexte IMMER erneuern — auch wenn alle Varianten schon
-                // registriert sind. Sonst bleibt "Unknown" stehen, sobald die
-                // Vanilla-Karte Start/UpdateVisualState erneut rendert.
+                // ALWAYS refresh card texts — even when all variants already
+                // registered. Else "Unknown" sticks once the
+                // vanilla card re-renders Start/UpdateVisualState.
                 if (_registeredIds.Count < ServerVariantSpec.All.Length)
                 {
                     int added = 0;
@@ -327,17 +327,17 @@ namespace GregMod.Backplanes
                         if (ShopContainsVariant(shop, spec))
                         {
                             _registeredIds.Add(spec.VariantId);
-                            // Karte kann von einer frueheren Registrierung uebrig
-                            // sein, waehrend ResetForScene die Base-ID-Map geloescht
-                            // hat - sonst fehlt das Prefab-Routing beim Spawn.
+                            // Card may be left over from an earlier registration
+                            // while ResetForScene cleared the base-ID map
+                            // - else prefab routing missing at spawn.
                             EnsureBaseIdMapping(shop, spec);
                             continue;
                         }
-                        // Eigene IDs duerfen nie mit Vanilla kollidieren.
+                        // Own IDs must never collide with vanilla.
                         if (VanillaUsesItemId(shop, spec.VariantItemId))
                         {
-                            Log.Error($"Varianten-ID {spec.VariantItemId} ({spec.VariantDisplayName}) kollidiert " +
-                                "mit Vanilla - Variante uebersprungen.");
+                            Log.Error($"Variant ID {spec.VariantItemId} ({spec.VariantDisplayName}) collides " +
+                                "with vanilla - variant skipped.");
                             continue;
                         }
                         var baseItem = FindBaseShopItem(shop, spec);
@@ -388,8 +388,8 @@ namespace GregMod.Backplanes
             catch { return 0; }
         }
 
-        /// <summary>Stellt sicher, dass die Varianten-ID eine Base-ID hat, auch wenn
-        /// die Karte schon existiert (ShopContainsVariant-Early-Path nach Reset).</summary>
+        /// Ensures the variant ID has a base ID, even if
+        /// the card already exists (ShopContainsVariant early path after reset).</summary>
         private void EnsureBaseIdMapping(ComputerShop shop, ServerVariantSpec spec)
         {
             try
@@ -408,10 +408,10 @@ namespace GregMod.Backplanes
             }
         }
 
-        // Vanilla-Shop-Reihen zeigen nur ~5 Karten (Rest wird geclippt).
-        // Reflow: aktive ShopItem-Kinder in 5er-Chunks auf Overflow-Reihen
-        // verteilen (Reihe klonen, Kinder umhängen). Idempotent: zuerst alte
-        // Overflow-Reihen zurückmergen, dann neu chunken.
+        // Vanilla shop rows show only ~5 cards (rest clipped).
+        // Reflow: spread active ShopItem children in 5-chunks across overflow rows
+        // (clone row, reparent children). Idempotent: first merge back old
+        // overflow rows, then re-chunk.
         private const int MaxCardsPerRow = 5;
         private const string OverflowSuffix = " Overflow";
 
@@ -419,10 +419,10 @@ namespace GregMod.Backplanes
         {
             try
             {
-                // Buttons szenenweit finden — NICHT ueber shop.shopItemParent:
-                // das ist beim Scene-Load-Trigger noch null, waehrend die
-                // Klone (via baseItem.transform.parent) laengst einsortiert
-                // sind. Deshalb lief der Reflow ins Leere (still return).
+                // Find buttons scene-wide — NOT via shop.shopItemParent:
+                // that is still null at scene-load trigger, while
+                // clones (via baseItem.transform.parent) are long sorted in.
+                // So reflow ran empty (silent return).
                 ShopItem[] all = null;
                 try { all = Resources.FindObjectsOfTypeAll<ShopItem>(); } catch { return; }
                 if (all == null) return;
@@ -454,11 +454,11 @@ namespace GregMod.Backplanes
 
                 if (buttons == 0)
                 {
-                    Log.Info("Reflow: keine Backplanes-Buttons gefunden (Shop-UI evtl. noch nicht aufgebaut).");
+                    Log.Info("Reflow: no Backplanes buttons found (shop UI maybe not built yet).");
                     return;
                 }
 
-                // Reihen direkt einsammeln (kein shop.shopItemParent nötig).
+                // Collect rows directly (no shop.shopItemParent needed).
                 var rowsById = new System.Collections.Generic.Dictionary<int, Transform>();
                 var scopes = new System.Collections.Generic.HashSet<int>();
                 var scopeById = new System.Collections.Generic.Dictionary<int, Transform>();
@@ -502,9 +502,9 @@ namespace GregMod.Backplanes
                     }
                 }
 
-                Log.Info($"Reflow: {buttons} Buttons in {rowsById.Count} Reihen verarbeitet.");
+                Log.Info($"Reflow: {buttons} buttons in {rowsById.Count} rows processed.");
 
-                // Layout neu aufbauen: Content per Name suchen, Fallback 4 Ebenen.
+                // Rebuild layout: find Content by name, fallback 4 levels.
                 try
                 {
                     Transform anchor = null;
@@ -595,8 +595,8 @@ namespace GregMod.Backplanes
             return null;
         }
 
-        // Verwaiste Leer-Reihen (keine ShopItem-Kinder, z.B. nach fehlgeschlagenem
-        // Destroy) entfernen, sonst steht eine leere Reihe im Shop.
+        // Remove orphaned empty rows (no ShopItem children, e.g. after failed
+        // destroy), else an empty row stands in the shop.
         private static void SweepStaleOverflowRows(Transform root)
         {
             try
@@ -643,7 +643,7 @@ namespace GregMod.Backplanes
                 }
 
                 if (doomed.Count > 0 && ModConfig.VerboseLogging)
-                    Log.Info($"Reflow: {doomed.Count} verwaiste Leer-Reihe(n) entfernt.");
+                    Log.Info($"Reflow: {doomed.Count} orphaned empty row(s) removed.");
             }
             catch { }
         }
@@ -670,7 +670,7 @@ namespace GregMod.Backplanes
             try { rowName = row.gameObject != null ? row.gameObject.name ?? "" : ""; } catch { }
             if (rowName.EndsWith(OverflowSuffix, StringComparison.Ordinal)) return;
 
-            // 1) Alte Overflow-Reihen dieser Familie zurückmergen + löschen.
+            // 1) Merge back + delete old overflow rows of this family.
             var overflowRows = new System.Collections.Generic.List<Transform>();
             try
             {
@@ -695,8 +695,8 @@ namespace GregMod.Backplanes
             {
                 try
                 {
-                    // Sofort unsichtbar (Destroy wirkt erst am Frame-Ende;
-                    // schlägt es fehl, bleibt sonst eine leere Reihe stehen).
+                    // Hide immediately (destroy applies at frame end;
+                    // if it fails, an empty row would stay).
                     try { ov.gameObject.SetActive(false); } catch { }
                     var kids = new System.Collections.Generic.List<Transform>();
                     try
@@ -720,7 +720,7 @@ namespace GregMod.Backplanes
                 try { UnityEngine.Object.Destroy(ov.gameObject); } catch { }
             }
 
-            // 2) Aktive ShopItem-Kinder in Original-Reihenfolge sammeln.
+            // 2) Collect active ShopItem children in original order.
             var cards = new System.Collections.Generic.List<Transform>();
             try
             {
@@ -751,12 +751,12 @@ namespace GregMod.Backplanes
 
             if (cards.Count <= MaxCardsPerRow)
             {
-                Log.Info($"Reflow '{rowName}': {cards.Count} aktive Karten, kein Umbruch nötig.");
+                Log.Info($"Reflow '{rowName}': {cards.Count} active cards, no split needed.");
                 return;
             }
 
-            // 3) Chunks ab dem zweiten in Overflow-Reihen (vorhandene
-            // inaktive wiederverwenden statt neu anzulegen).
+            // 3) Chunks from second on into overflow rows (reuse existing
+            // inactive ones instead of creating new).
             int overflowIdx = 0;
             for (int i = MaxCardsPerRow; i < cards.Count; i += MaxCardsPerRow)
             {
@@ -799,7 +799,7 @@ namespace GregMod.Backplanes
                     try { cards[j].SetParent(ovGo.transform, false); moved++; } catch { }
                 }
 
-                // Keinen leeren sichtbaren Overflow stehen lassen.
+                // Never leave an empty visible overflow behind.
                 if (moved == 0)
                 {
                     try { ovGo.SetActive(false); } catch { }
@@ -817,12 +817,12 @@ namespace GregMod.Backplanes
             }
 
             if (ModConfig.VerboseLogging)
-                Log.Info($"Reflow '{rowName}': {cards.Count} Karten -> {1 + overflowIdx} Reihen.");
+                Log.Info($"Reflow '{rowName}': {cards.Count} cards -> {1 + overflowIdx} rows.");
         }
 
-        /// <summary>Loest eine Varianten-ItemID auf die Base-ID auf (Prefab-Routing).
-        /// Base-IDs duerfen 0 sein (SystemX vanilla itemID=0) - nur das Fehlen
-        /// des Keys ist ein Fehlschlag.</summary>
+        /// <summary>Resolves a variant item ID to the base ID (prefab routing).
+        /// Base IDs may be 0 (SystemX vanilla itemID=0) - only a missing
+        /// key is a failure.</summary>
         internal bool TryGetBaseId(int variantItemId, out int baseItemId)
         {
             try
@@ -886,8 +886,8 @@ namespace GregMod.Backplanes
                 newSo.price = spec.Price;
                 newSo.xpToUnlock = spec.XpToUnlock;
                 newSo.itemType = baseItem.shopItemSO.itemType;
-                // Eigene Item-ID: Boosted Server sind eigenstaendige Eintraege
-                // (keine Base-Kopie mehr). Prefab-Routing via GetPrefabForItem-Prefix.
+                // Own item ID: boosted servers are standalone entries
+                // (no base copy anymore). Prefab routing via GetPrefabForItem prefix.
                 newSo.itemID = spec.VariantItemId;
                 newSo.eol = baseItem.shopItemSO.eol;
                 newSo.isCustomColor = false;
@@ -948,17 +948,17 @@ namespace GregMod.Backplanes
             try
             {
                 if (!IsServerItemType(itemType)) return;
-                // Strict Name -> Varianten-ID. KEIN Preis-Fallback: 20 Varianten
-                // teilen 5 Preis-Punkte (20k/100k/250k/500k/1M), Preis allein ist
-                // nicht eindeutig und hat in v1.x Phantom-/Fehl-Konfigurationen
-                // verursacht (BUGFIX_NOTES #7). Ohne Match wird NICHT getrackt —
-                // ein erratener Spec laeuft Gefahr, den falschen Server zu
-                // konfigurieren (ISSUE-005/008).
+                // Strict name -> variant ID. NO price fallback: 20 variants
+                // share 5 price points (20k/100k/250k/500k/1M), price alone is
+                // not unique and caused phantom/mis-configs in v1.x
+                // (BUGFIX_NOTES #7). Without match NOTHING is tracked —
+                // a guessed spec risks configuring the wrong server
+                // (ISSUE-005/008).
                 var spec = ServerVariantSpec.FindByShopValues(displayName, price);
                 string how = "Name-Match";
                 if (spec == null)
                 {
-                    // Exakte Varianten-ItemID (9001-9020) ist eindeutig.
+                    // Exact variant item ID (9001-9020) is unique.
                     spec = FindSpecByVariantId(itemId);
                     how = "ID-Match";
                 }
@@ -976,7 +976,7 @@ namespace GregMod.Backplanes
             }
         }
 
-        /// <summary>Exakter Match ueber Varianten-ItemID (9001-9020).</summary>
+        /// <summary>Exact match via variant item ID (9001-9020).</summary>
         private static ServerVariantSpec FindSpecByVariantId(int itemId)
         {
             try
@@ -1016,9 +1016,9 @@ namespace GregMod.Backplanes
             try
             {
                 if (!IsServerItemType(itemType)) return;
-                // Exakte Zuordnung zuerst: Checkout-Snapshot in Cart-Reihenfolge
-                // (Bulk-sicher, auch bei gemischten Preispunkten). Preis-Peek
-                // nur als Fallback fuer Spawns ausserhalb eines Checkouts.
+                // Exact mapping first: checkout snapshot in cart order
+                // (bulk-safe, also with mixed price points). Price peek
+                // only as fallback for spawns outside a checkout.
                 var spec = PeekCheckoutSpec();
                 GameObject go = null;
                 try { if (shop?.spawnedItems != null) shop.spawnedItems.TryGetValue(uid, out go); } catch { /* best-effort */ }
@@ -1028,21 +1028,21 @@ namespace GregMod.Backplanes
                     if (priceSpec != null && GoMatchesSpecFamily(go, priceSpec))
                         spec = priceSpec;
                     else
-                        Log.Warning($"Spawn uid={uid}: Cart-Reihenfolge weicht ab (erwartet " +
-                            $"{spec.VariantDisplayName}, Prefab '{go.name}') - nutze Snapshot-Spec.");
+                        Log.Warning($"Spawn uid={uid}: cart order differs (expected " +
+                            $"{spec.VariantDisplayName}, prefab '{go.name}') - using snapshot spec.");
                 }
                 if (spec == null)
                     spec = PeekPendingSpecForSpawn(price);
                 if (spec == null) return;
                 ConsumeCheckoutSpec(spec);
                 if (_checkoutExpectedUnits > 0) _checkoutVariantSpawned++;
-                Log.Info($"Spawn ({source}): {spec.VariantDisplayName} uid={uid} - suche physisches Item.");
+                Log.Info($"Spawn ({source}): {spec.VariantDisplayName} uid={uid} - looking for physical item.");
                 _spawnedSpecsByUid[uid] = spec;
                 RememberSpawnedUid(uid);
 
                 if (go == null)
                 {
-                    Log.Info($"Spawn uid {uid} fuer {spec.VariantDisplayName} noch nicht in spawnedItems; Drain/Insert uebernehmen.");
+                    Log.Info($"Spawn uid {uid} for {spec.VariantDisplayName} not in spawnedItems yet; drain/insert take over.");
                     return;
                 }
                 int configured = 0;
@@ -1071,8 +1071,8 @@ namespace GregMod.Backplanes
         /// after 60 seconds so the 1/sec sweep does not run forever.
         /// </summary>
         /// <summary>
-        /// Sofort-Drain ohne Throttle (z.B. direkt nach Checkout): Der Spawn
-        /// ist dann garantiert registriert - kein Warten auf den 1/s-Tick.
+        /// Immediate drain without throttle (e.g. right after checkout): spawn
+        /// is then guaranteed registered - no wait for 1/s tick.
         /// </summary>
         internal void DrainSpawnedSpecsNow(string source)
         {
@@ -1098,8 +1098,8 @@ namespace GregMod.Backplanes
                 try { shop.spawnedItems.TryGetValue(uid, out go); } catch { continue; }
                 if (go == null)
                 {
-                    // Diagnose (einmal pro UID): welche Keys hat spawnedItems
-                    // wirklich? Klaert ob unser UID-Read (0?) daneben liegt.
+                    // Diagnostics (once per UID): which keys does spawnedItems
+                    // really have? Clarifies whether our UID read (0?) is off.
                     if (_keysLoggedUids.Add(uid))
                     {
                         try
@@ -1120,13 +1120,13 @@ namespace GregMod.Backplanes
                                 }
                             }
                             catch { }
-                            Log.Info($"Spawn-Diagnose uid={uid}: spawnedItems hat {n} Eintraege " +
+                            Log.Info($"Spawn diagnostics uid={uid}: spawnedItems has {n} entries " +
                                 $"(z.B. {string.Join(",", sample.ConvertAll(k => k.ToString()).ToArray())}).");
                         }
                         catch { }
                     }
-                    // Noch nicht da oder schon an den Spieler uebergeben:
-                    // nach 60 s aufgeben (Insertion konfiguriert dann weiterhin).
+                    // Not there yet or already handed to player:
+                    // give up after 60 s (insertion still configures).
                     if (_spawnedUidCreatedAt.TryGetValue(uid, out DateTime created) &&
                         now - created > TimeSpan.FromSeconds(60))
                     {
@@ -1150,25 +1150,27 @@ namespace GregMod.Backplanes
         }
 
         /// <summary>
-        /// Expliziter Speed-Check direkt nach dem Spawn-Configure: liest
-        /// maxProcessingSpeed zurueck und meldet OK oder MISMATCH mit
-        /// Live-Wert. Unbedingt (nicht nur verbose) - ein Kauf ist selten.
+        /// Explicit speed check right after spawn configure: reads back
+        /// maxProcessingSpeed AND currentProcessingSpeed (screen shows
+        /// "usable" = current). Always (not just verbose) - a purchase is rare.
         /// </summary>
         private static void LogSpawnCheck(Server server, ServerVariantSpec spec, string source)
         {
             try
             {
                 float live = -1f;
+                float cur = -1f;
                 try { live = server.maxProcessingSpeed; } catch { }
+                try { cur = server.currentProcessingSpeed; } catch { }
                 if (Approx(live, spec.RuntimeProcessingSpeed))
-                    Log.Info($"Spawn-Check {spec.VariantDisplayName} ({source}): OK speed={live:F3}.");
+                    Log.Info($"Spawn check {spec.VariantDisplayName} ({source}): OK speed={live:F3} current={cur:F3}.");
                 else
-                    Log.Warning($"Spawn-Check {spec.VariantDisplayName} ({source}): MISMATCH " +
-                        $"live={live:F3} erwartet={spec.RuntimeProcessingSpeed:F3}.");
+                    Log.Warning($"Spawn check {spec.VariantDisplayName} ({source}): MISMATCH " +
+                        $"live={live:F3} current={cur:F3} expected={spec.RuntimeProcessingSpeed:F3}.");
             }
             catch (Exception ex)
             {
-                Log.Warning($"Spawn-Check {spec?.VariantDisplayName} ({source}) fehlgeschlagen: {ex.Message}");
+                Log.Warning($"Spawn check {spec?.VariantDisplayName} ({source}) failed: {ex.Message}");
             }
         }
 
@@ -1193,9 +1195,9 @@ namespace GregMod.Backplanes
         }
 
         /// <summary>
-        /// Alle 5 s: Watchlist pruefen. Driftet ein Varianten-Server vom Spec
-        /// weg (Spiel hat ueberschrieben), sofort neu konfigurieren + melden.
-        /// Tote Referenzen aussortieren. Laeuft auch ausserhalb des Fensters.
+        /// Every 5 s: check watchlist. If a variant server drifts off spec
+        /// (game overwrote), reconfigure immediately + report.
+        /// Drop dead references. Runs also outside the window.
         /// </summary>
         internal void TickWatchlist()
         {
@@ -1211,22 +1213,22 @@ namespace GregMod.Backplanes
                     if (server == null || spec == null) { DropWatched(ptr); continue; }
                     float live;
                     try { live = server.maxProcessingSpeed; }
-                    catch { DropWatched(ptr); continue; } // zerstoert
+                    catch { DropWatched(ptr); continue; } // destroyed
                     bool speedDrifted = !Approx(live, spec.RuntimeProcessingSpeed);
                     InspectPorts(server, spec, out int freeBad, out int found);
-                    // Ports pruefen, nicht nur IOPS: frisch gekaufte 500K-Server
-                    // blieben sonst bei Vanilla-connectionSpeed=0.2 („1 Gbps"),
-                    // waehrend maxProcessingSpeed korrekt war (v2.1.3).
+                    // Check ports, not just IOPS: freshly bought 500K servers
+                    // would otherwise stay at vanilla connectionSpeed=0.2 ("1 Gbps"),
+                    // while maxProcessingSpeed was correct (v2.1.3).
                     bool portsNeedFix = freeBad > 0 || found == 0;
                     if (!speedDrifted && !portsNeedFix) continue;
                     if (speedDrifted)
-                        Log.Warning($"Watchlist: {spec.VariantDisplayName} gedriftet " +
-                            $"(live={live:F3} erwartet={spec.RuntimeProcessingSpeed:F3}) - konfiguriere neu.");
+                        Log.Warning($"Watchlist: {spec.VariantDisplayName} drifted " +
+                            $"(live={live:F3} expected={spec.RuntimeProcessingSpeed:F3}) - reconfiguring.");
                     else if (freeBad > 0 && ModConfig.VerboseLogging)
-                        Log.Info($"Watchlist: {spec.VariantDisplayName} — {freeBad} freie Port(s) mit falscher Bandbreite " +
-                            $"(erwartet {spec.RuntimeNetworkSpeed * 5f:0.##} Gbps) - konfiguriere neu.");
+                        Log.Info($"Watchlist: {spec.VariantDisplayName} — {freeBad} free port(s) off bandwidth " +
+                            $"(expected {spec.RuntimeNetworkSpeed * 5f:0.##} Gbps) - reconfiguring.");
                     else if (found == 0 && ModConfig.VerboseLogging)
-                        Log.Info($"Watchlist: {spec.VariantDisplayName} — keine Ports gefunden - versuche Re-Suche.");
+                        Log.Info($"Watchlist: {spec.VariantDisplayName} — no ports found - retrying search.");
                     if (!RepairGuard.TryEnter(ptr)) continue;
                     try
                     {
@@ -1235,7 +1237,7 @@ namespace GregMod.Backplanes
                     }
                     catch (Exception ex)
                     {
-                        Log.Warning($"Watchlist Re-Configure fehlgeschlagen: {ex.Message}");
+                        Log.Warning($"Watchlist re-configure failed: {ex.Message}");
                     }
                     finally
                     {
@@ -1247,11 +1249,11 @@ namespace GregMod.Backplanes
             }
             catch (Exception ex)
             {
-                Log.Warning($"Watchlist-Tick fehlgeschlagen: {ex.Message}");
+                Log.Warning($"Watchlist tick failed: {ex.Message}");
             }
         }
 
-        // IOPS -> Gbps-Leiter (wie Varianten-Tiers). Unter 100k: -1 = Vanilla lassen.
+        // IOPS -> Gbps ladder (like variant tiers). Below 100k: -1 = leave vanilla.
         internal static float VanillaTierGbps(float maxProcessingSpeed)
         {
             float iops = maxProcessingSpeed * 100000f;
@@ -1267,9 +1269,9 @@ namespace GregMod.Backplanes
         private static DateTime _lastVanillaAuditAt = DateTime.MinValue;
 
         /// <summary>
-        /// Alle NICHT-Varianten-Server: freie Ports auf Tier-Speed heben
-        /// (Vanilla lässt sie bei 0.2 = 1 Gbps). Nur Speed, keine Flags/Typen.
-        /// Belegte Ports (Kabel/Modul) werden nie angefasst. Alle 30 s.
+        /// All NON-variant servers: raise free ports to tier speed
+        /// (vanilla leaves them at 0.2 = 1 Gbps). Speed only, no flags/types.
+        /// Busy ports (cable/module) never touched. Every 30 s.
         /// </summary>
         private static void AuditVanillaPortSpeeds(
             List<(IntPtr ptr, Server server, ServerVariantSpec spec)> watched)
@@ -1345,11 +1347,11 @@ namespace GregMod.Backplanes
                 }
 
                 if (fixedPorts > 0)
-                    Log.Info($"Vanilla-Port-Audit: {fixedPorts} Port(s) an {servers} Server(n) auf Tier-Speed gehoben.");
+                    Log.Info($"Vanilla port audit: {fixedPorts} port(s) on {servers} server(s) raised to tier speed.");
             }
             catch (Exception ex)
             {
-                Log.Warning($"Vanilla-Port-Audit fehlgeschlagen: {ex.Message}");
+                Log.Warning($"Vanilla port audit failed: {ex.Message}");
             }
         }
 
@@ -1379,8 +1381,8 @@ namespace GregMod.Backplanes
             return found;
         }
 
-        // Port-Zustand aufschlüsseln: Kabel-ID gesetzt? Modul live oder nur
-        // zerstörte Referenz (IL2CPP meldet tote Objekte als != null)?
+        // Break down port state: cable ID set? Module live or only
+        // destroyed reference (IL2CPP reports dead objects as != null)?
         private static void GetPortState(CableLink link, out bool hasCable, out bool hasModule, out bool deadModuleRef)
         {
             hasCable = false;
@@ -1453,7 +1455,7 @@ namespace GregMod.Backplanes
                 string liveName = "";
                 try { liveSpeed = server.maxProcessingSpeed; } catch { }
                 try { liveName = server.gameObject != null ? server.gameObject.name ?? "" : ""; } catch { }
-                // Save-Load-Burst nicht spammen: nur manuelle Inserts laut loggen.
+                // No save-load burst spam: only log manual inserts loudly.
                 if (saveData == null)
                     Log.Info($"Insert ({source}): '{liveName}' ptr=0x{ptr.ToInt64():X} liveSpeed={liveSpeed:F3} saveData=null.");
                 else if (ModConfig.VerboseLogging)
@@ -1461,10 +1463,10 @@ namespace GregMod.Backplanes
                 var spec = ResolveSpecForInsertedServer(server, consumePending: saveData == null);
                 if (spec == null)
                 {
-                    // Save-Load-Rauschen unterdruecken: Hunderte Vanilla-Server
-                    // beim Laden sind kein Fehler. Nur manuelle Inserts laut melden.
+                    // Suppress save-load noise: hundreds of vanilla servers
+                    // at load are no error. Only report manual inserts loudly.
                     if (saveData == null)
-                        Log.Info($"Insert ({source}): keine Spec aufgeloest (liveSpeed={liveSpeed:F3}) - bleibt Vanilla.");
+                        Log.Info($"Insert ({source}): no spec resolved (liveSpeed={liveSpeed:F3}) - stays vanilla.");
                     else if (ModConfig.VerboseLogging && _pendingInsertions.Count > 0)
                         Log.Info($"Insertion from {source} has {_pendingInsertions.Count} pending purchase(s) but no match (id='{ReadServerId(server) ?? ""}').");
                     return;
@@ -1472,8 +1474,8 @@ namespace GregMod.Backplanes
                 if (!SpeedPlausibleForSpec(liveSpeed, spec))
                 {
                     Log.Warning($"Resolved {spec.VariantDisplayName} for inserted server, " +
-                        $"but liveSpeed={liveSpeed:F3} passt weder zu Base ({spec.BaseRuntimeProcessingSpeed:F3}) " +
-                        $"noch Variante ({spec.RuntimeProcessingSpeed:F3}). Skipping.");
+                        $"but liveSpeed={liveSpeed:F3} matches neither base ({spec.BaseRuntimeProcessingSpeed:F3}) " +
+                        $"nor variant ({spec.RuntimeProcessingSpeed:F3}). Skipping.");
                     return;
                 }
                 ConfigureServerAndPorts(server, spec, source, out bool serverChanged, out int changedPorts);
@@ -1485,11 +1487,11 @@ namespace GregMod.Backplanes
                 }
                 if (!string.IsNullOrEmpty(id)) _registry.Set(id, spec);
                 _pendingSpecsByPointer.Remove(ptr);
-                // KEIN RemoveOnePendingSpec hier: ein Kauf wird genau einmal
-                // konsumiert - an der Spawn-Stelle (ConsumePendingSpecForSpawn)
-                // bzw. in DequeueMatchingPendingSpec. Ein zweiter Konsum hier
-                // wuerde einen Folge-Kauf desselben Preispunkts (20k/100k/250k/500k/1M)
-                // fehl-verbrauchen und zu Fehl-Zuordnung fuehren.
+                // NO RemoveOnePendingSpec here: a purchase is consumed exactly once
+                // - at the spawn site (ConsumePendingSpecForSpawn)
+                // or in DequeueMatchingPendingSpec. A second consume here
+                // would mis-consume a follow-up buy at the same price point (20k/100k/250k/500k/1M)
+                // and cause mis-mapping.
                 Log.Info($"Finalized {spec.VariantDisplayName} from {source}: serverChanged={serverChanged}, changedPorts={changedPorts}.");
             }
             catch (Exception ex)
@@ -1533,7 +1535,7 @@ namespace GregMod.Backplanes
                 {
                     if (!string.IsNullOrEmpty(id)) _repairedServerIds.Add(id);
                     Log.Warning($"Skipped persisted marker for {spec.VariantDisplayName}: " +
-                        $"liveSpeed={repairSpeed:F3} passt weder zu Base noch Variante (id='{id}').");
+                        $"liveSpeed={repairSpeed:F3} matches neither base nor variant (id='{id}').");
                     return;
                 }
                 ConfigureServerAndPorts(server, spec, source, out bool serverChanged, out int changedPorts);
@@ -1604,12 +1606,30 @@ namespace GregMod.Backplanes
             try
             {
                 float target = spec.RuntimeProcessingSpeed;
-                if (!Approx(server.maxProcessingSpeed, target))
+                float oldMax = -1f;
+                try { oldMax = server.maxProcessingSpeed; } catch { }
+                if (!Approx(oldMax, target))
                 {
                     server.maxProcessingSpeed = target;
                     serverChanged = true;
+                    // Freshly configured, but current still stuck under the old
+                    // cap (vanilla init, never rises on its own): then the
+                    // displayed "usable" value is permanently wrong. Only raise if
+                    // current never exceeded the old cap - a live game-managed
+                    // value above it we never touch.
+                    // Clamp, never zero: v1.x wrote 0 when out of range, stalling output.
+                    try
+                    {
+                        float cur = server.currentProcessingSpeed;
+                        if (cur < target && oldMax >= 0f && cur <= oldMax + 0.001f)
+                        {
+                            server.currentProcessingSpeed = target;
+                            if (ModConfig.VerboseLogging)
+                                Log.Info($"Raised stale current {spec.VariantDisplayName}: {cur:F3} -> {target:F3} (old max {oldMax:F3}).");
+                        }
+                    }
+                    catch { /* best-effort */ }
                 }
-                // Clamp, never zero: v1.x wrote 0 when out of range, stalling output.
                 if (server.currentProcessingSpeed > target)
                 {
                     server.currentProcessingSpeed = target;
@@ -1624,21 +1644,21 @@ namespace GregMod.Backplanes
                 }
                 if (links.Count == 0 && ModConfig.VerboseLogging)
                 {
-                    // Insert oft vor CableLink.Start/RegisterLink: Ports noch nicht
-                    // erreichbar -> Watchlist retryet alle 5 s (v2.1.3).
-                    Log.Info($"Configure {spec.VariantDisplayName} from {source}: 0 Ports gefunden " +
-                        "(Links noch nicht registriert?) - Watchlist-Retry aktiv.");
+                    // Insert often before CableLink.Start/RegisterLink: ports not yet
+                    // reachable -> watchlist retries every 5 s (v2.1.3).
+                    Log.Info($"Configure {spec.VariantDisplayName} from {source}: 0 ports found " +
+                        "(links not registered yet?) - watchlist retry active.");
                 }
 
                 // Visual differentiation (tint + scale). Idempotent and cheap after
                 // the first pass; runs on every configure path (spawn/insert/repair).
                 ServerVisuals.Apply(server, spec);
 
-                // Read-Back-Verifikation: Beweist ob die Werte wirklich haften
-                // (oder ob das Spiel sie danach zuruecksetzt). Mismatch -> Warnung.
+                // Read-back verify: proves whether values really stick
+                // (or game resets them after). Mismatch -> warning.
                 VerifyApplied(server, spec, source);
 
-                // Watchlist: Speed bleibt ueberwacht, Re-Assert bei Drift.
+                // Watchlist: speed stays monitored, re-assert on drift.
                 WatchServer(server, spec);
 
                 if ((serverChanged || changedPorts > 0) && ModConfig.VerboseLogging)
@@ -1680,9 +1700,9 @@ namespace GregMod.Backplanes
             catch { /* best-effort */ }
             try
             {
-                // Kinder-Scan: Ports ausserhalb IsServerLinkFor-Filter akzeptieren,
-                // solange sie nicht eindeutig Switch/PatchPanel zugeordnet sind.
-                // typeOfLink kann vor RegisterLink noch None sein (v2.1.3).
+                // Child scan: accept ports outside IsServerLinkFor filter,
+                // as long as not clearly assigned to switch/patch panel.
+                // typeOfLink may still be None before RegisterLink (v2.1.3).
                 foreach (var link in server.GetComponentsInChildren<CableLink>(true))
                 {
                     rawChildren++;
@@ -1693,8 +1713,8 @@ namespace GregMod.Backplanes
                 }
             }
             catch { /* best-effort */ }
-            // Fallback: scene-weite Suche nach parentServer-Pointer-Match
-            // (Ports ggf. nicht unter der Server-Hierarchie).
+            // Fallback: scene-wide search for parentServer pointer match
+            // (ports possibly outside server hierarchy).
             if (result.Count == 0)
             {
                 try
@@ -1740,8 +1760,8 @@ namespace GregMod.Backplanes
                     try { b = server.Pointer; } catch { return false; }
                     return a == b;
                 }
-                // Unassigned server-side port: typeOfLink kann vor RegisterLink
-                // noch None sein — None + Server akzeptieren, Rest ablehnen.
+                // Unassigned server-side port: typeOfLink may still be None before RegisterLink
+                // — accept None + server, reject rest.
                 return link.typeOfLink == CableLink.TypeOfLink.Server
                     || link.typeOfLink == CableLink.TypeOfLink.None;
             }
@@ -1854,7 +1874,7 @@ namespace GregMod.Backplanes
                 return byPointer;
             var byRegistry = ResolveSpecForServer(server);
             if (byRegistry != null) return byRegistry;
-            // Tier: Server laeuft bereits auf Varianten-Speed (nach Finalize/Insert).
+            // Tier: server already running at variant speed (after finalize/insert).
             var byTier = InferSpecBySpeedTier(server);
             if (byTier != null) return byTier;
             return null;
@@ -1868,9 +1888,9 @@ namespace GregMod.Backplanes
                 // once — CableLink event postfixes re-assert the speed on drift.
                 try { if (link != null && spec != null) PortSpeedMemory.Register(link, spec.RuntimeNetworkSpeed); } catch { }
                 // Port in use (cable id assigned or live SFP module inserted):
-                // hands off — ausser ForcePortSpeed ist an. Zerstörte
-                // Modul-Refs (IL2CPP-Fake-Null) zählen als frei und werden
-                // bereinigt, sonst bleibt jeder Port ewig "belegt".
+                // hands off — unless ForcePortSpeed is on. Destroyed
+                // module refs (IL2CPP fake null) count as free and are
+                // cleaned, else every port stays "busy" forever.
                 bool force = false;
                 try { force = ModConfig.ForcePortSpeed; } catch { }
                 GetPortState(link, out bool hasCable, out bool hasModule, out bool deadRef);
@@ -1896,11 +1916,11 @@ namespace GregMod.Backplanes
                 try { if (!link.isSFPPort) { link.isSFPPort = true; changed = true; } } catch { /* best-effort */ }
                 try { if (!link.isFibrePort) { link.isFibrePort = true; changed = true; } } catch { /* best-effort */ }
                 try { if (link.sfpTypeSupported != spec.SfpType) { link.sfpTypeSupported = spec.SfpType; changed = true; } } catch { /* best-effort */ }
-                // NIE sfpTypeInserted auf leeren Ports setzen: Das erzeugt ein
-                // Phantom-Modul (Typ gesetzt, aber insertedSFP == null). Das Spiel
-                // hält den Port dann für belegt (echte SFP+/SFP28-Module werden
-                // abgewiesen) und rendert kein Modell (nichts da). Umgekehrt:
-                // Altlasten früherer Versionen reparieren (gesetzt ohne Modul -> 0).
+                // NEVER set sfpTypeInserted on empty ports: that creates a
+                // phantom module (type set, but insertedSFP == null). Game then
+                // treats the port as busy (real SFP+/SFP28 modules get
+                // rejected) and renders no model (nothing there). Conversely:
+                // repair leftovers from older versions (set without module -> 0).
                 try
                 {
                     if (!hasModule && link.sfpTypeInserted != 0)
@@ -1940,9 +1960,9 @@ namespace GregMod.Backplanes
         }
 
         /// <summary>
-        /// Liest die eben geschriebenen Werte zurueck. Mismatch heisst: Das Spiel
-        /// (oder ein anderer Mod) hat sie danach ueberschrieben - dann ist
-        /// Configure der falsche Zeitpunkt/das falsche Feld.
+        /// Reads back the just-written values. Mismatch means: game
+        /// (or another mod) overwrote them after - then configure
+        /// is the wrong time/wrong field.
         /// </summary>
         private static void VerifyApplied(Server server, ServerVariantSpec spec, string source)
         {
@@ -1952,15 +1972,17 @@ namespace GregMod.Backplanes
                 try { live = server.maxProcessingSpeed; }
                 catch (Exception ex)
                 {
-                    Log.Warning($"Verify {spec.VariantDisplayName} ({source}): maxProcessingSpeed nicht lesbar: {ex.Message}");
+                    Log.Warning($"Verify {spec.VariantDisplayName} ({source}): maxProcessingSpeed unreadable: {ex.Message}");
                     return;
                 }
                 if (!Approx(live, spec.RuntimeProcessingSpeed))
                 {
                     Log.Warning($"Verify {spec.VariantDisplayName} ({source}): MISMATCH maxProcessingSpeed " +
-                        $"live={live:F3} erwartet={spec.RuntimeProcessingSpeed:F3}.");
+                        $"live={live:F3} expected={spec.RuntimeProcessingSpeed:F3}.");
                     return;
                 }
+                float cur = -1f;
+                try { cur = server.currentProcessingSpeed; } catch { }
                 int checkedPorts = 0, badPorts = 0, foundPorts = 0, busyPorts = 0;
                 int busyCable = 0, busyModule = 0, busyDeadRef = 0;
                 foreach (var link in CollectServerLinks(server))
@@ -1984,24 +2006,29 @@ namespace GregMod.Backplanes
                     if (!Approx(ls, spec.RuntimeNetworkSpeed)) badPorts++;
                 }
                 Log.Info($"Verify {spec.VariantDisplayName} ({source}): OK " +
-                    $"max={live:F3}, Ports gefunden={foundPorts}, geprueft={checkedPorts}, " +
-                    $"belegt={busyPorts}(Kabel:{busyCable},Modul:{busyModule},tot:{busyDeadRef}), abweichend={badPorts}.");
+                    $"max={live:F3} current={cur:F3}, ports found={foundPorts}, checked={checkedPorts}, " +
+                    $"busy={busyPorts}(cable:{busyCable},module:{busyModule},dead:{busyDeadRef}), off={badPorts}.");
+                if (cur >= 0f && cur < live && cur <= spec.BaseRuntimeProcessingSpeed + 0.001f)
+                {
+                    Log.Warning($"Verify {spec.VariantDisplayName} ({source}): STALE-CURRENT current={cur:F3} " +
+                        $"stuck at vanilla level (max={live:F3} correct) - screen may show wrong 'usable' values.");
+                }
                 if (badPorts > 0)
                 {
-                    Log.Warning($"Verify {spec.VariantDisplayName}: {badPorts} freie Port(s) noch auf falscher " +
-                        $"Bandbreite (erwartet {spec.RuntimeNetworkSpeed * 5f:0.##} Gbps = {spec.RuntimeNetworkSpeed:F3}).");
+                    Log.Warning($"Verify {spec.VariantDisplayName}: {badPorts} free port(s) still off " +
+                        $"bandwidth (expected {spec.RuntimeNetworkSpeed * 5f:0.##} Gbps = {spec.RuntimeNetworkSpeed:F3}).");
                 }
             }
             catch (Exception ex)
             {
-                Log.Warning($"Verify {spec.VariantDisplayName} ({source}) fehlgeschlagen: {ex.Message}");
+                Log.Warning($"Verify {spec.VariantDisplayName} ({source}) failed: {ex.Message}");
             }
         }
 
         /// <summary>
-        /// Read-only Audit ueber alle Server: Welche Varianten-Marker sind live
-        /// korrekt konfiguriert, welche weichen ab, welche sind unbekannt?
-        /// Schreibt nichts - reiner Befund fuer Panel + Log.
+        /// Read-only audit across all servers: which variant markers are live
+        /// correctly configured, which drift, which are unknown?
+        /// Writes nothing - findings only for panel + log.
         /// </summary>
         internal void VerifyAllServers(string source)
         {
@@ -2015,8 +2042,8 @@ namespace GregMod.Backplanes
                 try { servers = UnityEngine.Object.FindObjectsOfType<Server>(); }
                 catch (Exception ex)
                 {
-                    LastVerifySummary = "Verify: Server-Suche fehlgeschlagen.";
-                    Log.Warning("Verify: Server-Suche fehlgeschlagen: " + ex.Message);
+                    LastVerifySummary = "Verify: server search failed.";
+                    Log.Warning("Verify: server search failed: " + ex.Message);
                     return;
                 }
                 if (servers == null) return;
@@ -2044,9 +2071,9 @@ namespace GregMod.Backplanes
                             mismatchNames.Add($"{spec.VariantDisplayName} @{n}");
                         }
                     }
-                    // Link-Audit (read-only, nur Varianten-Server): zeigt pro
-                    // belegtem Port Cap, Kabel, Modul (+Modul-Speed) und Gegen-
-                    // seite. Klaert "es kommen nur 1 Gbit an" ohne Raten.
+                    // Link audit (read-only, variant servers only): shows per
+                    // busy port cap, cable, module (+module speed) and far
+                    // side. Clarifies "only 1 Gbit arrives" without guessing.
                     if (auditLines < MaxAuditLines)
                         auditLines += AuditConnectedLinks(spec, server, MaxAuditLines - auditLines);
                 }
@@ -2059,14 +2086,14 @@ namespace GregMod.Backplanes
             LastVerifyOk = ok;
             LastVerifyMismatch = mismatch;
             LastVerifyUnknown = unknown;
-            LastVerifySummary = $"Verify ({source}): OK={ok} Mismatch={mismatch} Unbekannt={unknown}" +
-                (mismatchNames.Count > 0 ? " | z.B. " + string.Join(", ", mismatchNames.ToArray()) : "");
+            LastVerifySummary = $"Verify ({source}): OK={ok} Mismatch={mismatch} Unknown={unknown}" +
+                (mismatchNames.Count > 0 ? " | e.g. " + string.Join(", ", mismatchNames.ToArray()) : "");
             Log.Info(LastVerifySummary);
         }
 
         /// <summary>
-        /// Read-only Link-Audit fuer einen Varianten-Server. Gibt die Anzahl
-        /// geloggter Zeilen zurueck (Budget vom Aufrufer). Schreibt nie.
+        /// Read-only link audit for one variant server. Returns the number
+        /// of logged lines (budget from caller). Never writes.
         /// </summary>
         private static int AuditConnectedLinks(ServerVariantSpec spec, Server server, int budget)
         {
@@ -2086,17 +2113,17 @@ namespace GregMod.Backplanes
                     if (!hasCable && !hasModule) continue;
                     float portGbps = -1f;
                     try { portGbps = link.connectionSpeed * 5f; } catch { }
-                    string modText = "nein";
+                    string modText = "no";
                     try
                     {
                         if (hasModule)
                         {
                             float ms = -1f;
                             try { ms = link.insertedSFP.speed * 5f; } catch { }
-                            modText = ms >= 0f ? $"{ms:0.##}Gbps" : "ja";
+                            modText = ms >= 0f ? $"{ms:0.##}Gbps" : "yes";
                         }
                     }
-                    catch { modText = "ja?"; }
+                    catch { modText = "yes?"; }
                     string far = "?";
                     try
                     {
@@ -2109,8 +2136,8 @@ namespace GregMod.Backplanes
                     }
                     catch { /* best-effort */ }
                     lines++;
-                    Log.Info($"Link-Audit {spec.VariantDisplayName} @{srvName}: port={portGbps:0.##}Gbps " +
-                        $"kabel={(hasCable ? "ja" : "nein")} modul={modText} -> {far}");
+                    Log.Info($"Link audit {spec.VariantDisplayName} @{srvName}: port={portGbps:0.##}Gbps " +
+                        $"cable={(hasCable ? "yes" : "no")} module={modText} -> {far}");
                 }
             }
             catch { /* audit best-effort */ }
@@ -2132,9 +2159,9 @@ namespace GregMod.Backplanes
             var inferred = InferSpecFromRuntime(server);
             if (inferred != null) return inferred;
 
-            // Speed-Tier-Inferenz (namen-unabhaengig): Server laeuft bereits
-            // auf Varianten-Speed (z.B. Spawn-configure, Rename durch Dritte).
-            // Familie ggf. unscharf (Tint) - Werte pro Tier sind identisch.
+            // Speed tier inference (name-independent): server already running
+            // at variant speed (e.g. spawn configure, rename by third party).
+            // Family possibly fuzzy (tint) - values per tier identical.
             var byTier = InferSpecBySpeedTier(server);
             if (byTier != null) return byTier;
 
@@ -2150,9 +2177,9 @@ namespace GregMod.Backplanes
         }
 
         /// <summary>
-        /// Speed-Plausibilitaet ohne Namen: akzeptiert Base-Speed (frisch) und
-        /// Varianten-Speed (bereits konfiguriert). Schuetzt vor Konfiguration
-        /// voellig fremder Server, ohne auf (umbenennbare) Objektnamen zu bauen.
+        /// Speed plausibility without names: accepts base speed (fresh) and
+        /// variant speed (already configured). Guards against configuring
+        /// totally foreign servers without relying on (renamable) object names.
         /// </summary>
         private static bool SpeedPlausibleForSpec(float liveSpeed, ServerVariantSpec spec)
         {
@@ -2162,8 +2189,8 @@ namespace GregMod.Backplanes
         }
 
         /// <summary>
-        /// Tier-Inferenz: Live-Speed entspricht einer Varianten-Stufe.
-        /// Familien-Zuordnung ggf. unscharf (erste passende Spec).
+        /// Tier inference: live speed matches a variant tier.
+        /// Family mapping possibly fuzzy (first matching spec).
         /// </summary>
         private static ServerVariantSpec InferSpecBySpeedTier(Server server)
         {
@@ -2265,25 +2292,25 @@ namespace GregMod.Backplanes
         private void EnqueuePending(ServerVariantSpec spec)
         {
             _pendingInsertions.Enqueue(new PendingInsertion { Spec = spec, CreatedAt = DateTime.UtcNow });
-            // Bulk-Kaeufe (LargerCart): 30+ Units duerfen nicht die aeltesten
-            // Eintraege verdrangen. Cap grosszuegig, Expiry (10min) raeumt auf.
+            // Bulk buys (LargerCart): 30+ units must not push out the oldest
+            // entries. Generous cap, expiry (10min) cleans up.
             int dropped = 0;
             while (_pendingInsertions.Count > 200) { _pendingInsertions.Dequeue(); dropped++; }
             if (dropped > 0 && ModConfig.VerboseLogging)
-                Log.Info($"Pending-Cap: {dropped} aelteste Eintraege verworfen.");
+                Log.Info($"Pending cap: {dropped} oldest entries dropped.");
         }
 
         private ServerVariantSpec PeekPendingSpecForSpawn(int price)
         {
-            // Peek (kein Konsum!): Der Eintrag bleibt fuer die Insertion
-            // erhalten und wird erst dort verbraucht (FinalizeInsertedServer).
+            // Peek (no consume!): entry stays for the insertion
+            // and is consumed there (FinalizeInsertedServer).
             DateTime now = DateTime.UtcNow;
             int count = _pendingInsertions.Count;
             ServerVariantSpec match = null;
             for (int i = 0; i < count; i++)
             {
                 var pending = _pendingInsertions.Dequeue();
-                if (now - pending.CreatedAt > TimeSpan.FromMinutes(10)) continue; // stale: droppen
+                if (now - pending.CreatedAt > TimeSpan.FromMinutes(10)) continue; // stale: drop
                 if (match == null && pending.Spec.Price == price)
                     match = pending.Spec;
                 _pendingInsertions.Enqueue(pending);
@@ -2296,12 +2323,12 @@ namespace GregMod.Backplanes
             try { _spawnedUidCreatedAt[uid] = DateTime.UtcNow; } catch { /* best-effort */ }
         }
 
-        /// <summary>Baut den Checkout-Snapshot: eine Spec pro Unit in
-        /// Cart-Reihenfolge (qty expandiert). Vanilla spawnt in Cart-Order,
-        /// daher korreliert der n-te SpawnPhysicalItem mit dem n-ten Eintrag -
-        /// exakt, auch bei 30+ Units und gemischten Familien zum selben Preis.
-        /// Bei Familien-Mismatch am Prefab greift der Familien-Check in
-        /// ConfigureSpawnedItem (Preis-Peek als Korrektur).</summary>
+        /// <summary>Builds the checkout snapshot: one spec per unit in
+        /// cart order (qty expanded). Vanilla spawns in cart order,
+        /// so the n-th SpawnPhysicalItem correlates with the n-th entry -
+        /// exact, even with 30+ units and mixed families at the same price.
+        /// On family mismatch at prefab, the family check in
+        /// ConfigureSpawnedItem applies (price peek as correction).</summary>
         internal void BeginCheckoutSnapshot(ComputerShop shop)
         {
             try
@@ -2325,14 +2352,14 @@ namespace GregMod.Backplanes
                     _checkoutExpectedUnits += qty;
                 }
                 if (_checkoutExpectedUnits > 0)
-                    Log.Info($"Checkout-Snapshot: {_checkoutExpectedUnits} Boosted-Unit(s) in Cart-Reihenfolge erwartet.");
+                    Log.Info($"Checkout snapshot: {_checkoutExpectedUnits} boosted unit(s) in cart order expected.");
             }
-            catch (Exception ex) { Log.Warning("Checkout-Snapshot failed: " + ex.Message); }
+            catch (Exception ex) { Log.Warning("Checkout snapshot failed: " + ex.Message); }
         }
 
-        /// <summary>Post-Checkout-Verify: konfigurierte Varianten-Units vs.
-        /// erwartete Units. Abweichung = Warnung im Log + sichtbare
-        /// gregCore-Notification (Sicherheitsnetz bei Bulk-Kaeufen).</summary>
+        /// <summary>Post-checkout verify: configured variant units vs.
+        /// expected units. Mismatch = warning in log + visible
+        /// gregCore notification (safety net for bulk buys).</summary>
         internal void VerifyCheckout(string source)
         {
             try
@@ -2340,24 +2367,24 @@ namespace GregMod.Backplanes
                 if (_checkoutExpectedUnits == 0) return;
                 if (_checkoutVariantSpawned != _checkoutExpectedUnits)
                 {
-                    string msg = $"Backplanes: {_checkoutVariantSpawned}/{_checkoutExpectedUnits} Boosted-Servern konfiguriert ({source}).";
-                    Log.Warning(msg + " Cart vs. Spawn weicht ab - Log pruefen.");
+                    string msg = $"Backplanes: {_checkoutVariantSpawned}/{_checkoutExpectedUnits} boosted servers configured ({source}).";
+                    Log.Warning(msg + " Cart vs. spawn differs - check log.");
                     if (GregHost.HasCore)
                     {
                         try { BackplanesMod.NotifyCore(msg); } catch { /* best-effort */ }
                     }
                 }
                 else if (ModConfig.VerboseLogging)
-                    Log.Info($"Checkout-Verify: {_checkoutVariantSpawned}/{_checkoutExpectedUnits} Boosted-Units konfiguriert.");
+                    Log.Info($"Checkout verify: {_checkoutVariantSpawned}/{_checkoutExpectedUnits} boosted units configured.");
                 int leftover = 0;
                 try { leftover = _checkoutSpecQueue.Count; } catch { }
                 if (leftover > 0)
                 {
-                    Log.Warning($"Checkout-Verify: {leftover} Boosted-Spec(s) ohne Spawn uebrig - Prefab-Routing pruefen.");
+                    Log.Warning($"Checkout verify: {leftover} boosted spec(s) left without spawn - check prefab routing.");
                     try { _checkoutSpecQueue.Clear(); } catch { }
                 }
             }
-            catch (Exception ex) { Log.Warning("Checkout-Verify failed: " + ex.Message); }
+            catch (Exception ex) { Log.Warning("Checkout verify failed: " + ex.Message); }
         }
 
         private ServerVariantSpec PeekCheckoutSpec()
@@ -2386,8 +2413,8 @@ namespace GregMod.Backplanes
             catch { /* best-effort */ }
         }
 
-        /// <summary>Prueft, ob das gespawnte Prefab zur Spec-Familie passt
-        /// (BaseRuntimeToken, _-tolerant). Schuetzt vor Cart-Order-Drift.</summary>
+        /// <summary>Checks whether the spawned prefab fits the spec family
+        /// (BaseRuntimeToken, _-tolerant). Guards against cart-order drift.</summary>
         private static bool GoMatchesSpecFamily(GameObject go, ServerVariantSpec spec)
         {
             try
@@ -2406,7 +2433,7 @@ namespace GregMod.Backplanes
                 }
                 return false;
             }
-            catch { return true; } // im Zweifel nicht blockieren
+            catch { return true; } // on doubt never block
         }
 
         private ServerVariantSpec DequeueMatchingPendingSpec(Server server)
@@ -2424,9 +2451,9 @@ namespace GregMod.Backplanes
                     match = pending.Spec;
                 else
                 {
-                    // Fallback: Name passt zur Spec-Familie, Speed aber nicht
-                    // (z.B. Base-Speed im Spiel gedriftet oder bereits vorkonfiguriert).
-                    // Pending-Kaeufe sind begrenzt/gueltig - besser als nichts.
+                    // Fallback: name fits spec family, speed does not
+                    // (e.g. base speed drifted in game or already preconfigured).
+                    // Pending buys are bounded/valid - better than nothing.
                     if (nameOnlyFallback == null)
                     {
                         try
@@ -2442,17 +2469,17 @@ namespace GregMod.Backplanes
             }
             if (match == null && nameOnlyFallback != null)
             {
-                Log.Warning($"Nutze Name-only-Match {nameOnlyFallback.VariantDisplayName} " +
-                    "(Base-Speed passt nicht - Spiel gedriftet oder vorkonfiguriert).");
+                Log.Warning($"Using name-only match {nameOnlyFallback.VariantDisplayName} " +
+                    "(base speed mismatch - game drifted or preconfigured).");
                 RemoveOnePendingSpec(nameOnlyFallback);
                 return nameOnlyFallback;
             }
             if (match == null)
             {
-                // Letzter Fallback: aeltester gueltiger Pending-Kauf (FIFO).
-                // Greift wenn Identitaet unkenntlich ist (z.B. Fremd-Rename wie
-                // gregID:Server:...). Bewusst laut, damit Fehl-Zuordnungen
-                // im Log sichtbar sind.
+                // Last fallback: oldest valid pending buy (FIFO).
+                // Applies when identity unrecognizable (e.g. foreign rename like
+                // gregID:Server:...). Deliberately loud, so mis-mappings
+                // stay visible in log.
                 DateTime now2 = DateTime.UtcNow;
                 ServerVariantSpec oldest = null;
                 DateTime oldestAt = DateTime.MaxValue;
@@ -2469,8 +2496,8 @@ namespace GregMod.Backplanes
                 {
                     string srv = "";
                     try { srv = server.gameObject != null ? server.gameObject.name ?? "" : ""; } catch { }
-                    Log.Warning($"Nutze FIFO-Fallback {oldest.VariantDisplayName} " +
-                        $"fuer Insert '{srv}' (kein Match moeglich).");
+                    Log.Warning($"Using FIFO fallback {oldest.VariantDisplayName} " +
+                        $"for insert '{srv}' (no match possible).");
                     RemoveOnePendingSpec(oldest);
                     return oldest;
                 }
@@ -2494,18 +2521,18 @@ namespace GregMod.Backplanes
             }
         }
 
-        // Hinweis: Kein hartes Loeschen von Pending-State bei Shop-Aktionen
-        // mehr (Clear/Cancel): gekaufte Items existieren physisch weiter, und
-        // ein Wipe zerstoert die Kauf->Insert-Korrelation. Abgelaufenes
-        // raeumen Expiry-Pfade weg (Pending 10min, Spawn-UIDs 60s).
+        // Note: no hard wipe of pending state on shop actions
+        // anymore (clear/cancel): bought items keep existing physically, and
+        // a wipe destroys the buy->insert correlation. Expired entries
+        // cleaned by expiry paths (pending 10min, spawn UIDs 60s).
 
-        /// <summary>Serialisiert Marker fuer GregSaveGuard-Sidecar.</summary>
+        /// <summary>Serializes markers for GregSaveGuard sidecar.</summary>
         internal string RegistrySerialize()
         {
             try { return _registry.Serialize(); } catch { return ""; }
         }
 
-        /// <summary>Laedt Marker aus GregSaveGuard-Sidecar.</summary>
+        /// <summary>Loads markers from GregSaveGuard sidecar.</summary>
         internal void RegistryDeserialize(string content)
         {
             try { _registry.Deserialize(content); } catch { }
