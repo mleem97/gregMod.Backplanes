@@ -4,7 +4,7 @@ using MelonLoader;
 using UnityEngine;
 using UnityEngine.InputSystem;
 
-[assembly: MelonInfo(typeof(GregMod.Backplanes.BackplanesMod), "gregMod.Backplanes", "2.2.3", "TeamGreg Modding")]
+[assembly: MelonInfo(typeof(GregMod.Backplanes.BackplanesMod), "gregMod.Backplanes", "2.3.0", "TeamGreg Modding")]
 [assembly: MelonGame("Waseku", "Data Center")]
 
 namespace GregMod.Backplanes
@@ -71,7 +71,7 @@ namespace GregMod.Backplanes
     }
 
     /// <summary>
-    /// gregMod.Backplanes v2.2.3 — refactored successor of BackplaneBoostServers v1.0.1.
+    /// gregMod.Backplanes v2.3.0 — refactored successor of BackplaneBoostServers v1.0.1.
     ///
     /// 20 high-IOPS backplane server variants (SystemX / RISC / Mainframe / GPU ×
     /// 100K/500K/1M/2M/4M) with bandwidth tiers aligned to gregMod.MoreModules
@@ -92,7 +92,7 @@ namespace GregMod.Backplanes
             {
                 Instance = this;
                 ModConfig.Load();
-                Log.Info("Initializing gregMod.Backplanes v2.2.3 (refactored from BackplaneBoostServers v1.0.1).");
+                Log.Info("Initializing gregMod.Backplanes v2.3.0 (refactored from BackplaneBoostServers v1.0.1).");
                 Log.Info($"Press {ModConfig.ToggleKey} for the Backplanes panel.");
                 Patches.Apply(HarmonyInstance);
                 if (GregHost.HasCore)
@@ -160,7 +160,7 @@ namespace GregMod.Backplanes
             // Click routing for the panel (fallback when no EventSystem delivers).
             try { BackplanesOverlay.RouteClicks(); } catch (Exception ex) { Log.Error("Click routing failed.", ex); }
 
-            // RGB-Streifen: Hue-Rotation für getrackte Titan-Materialien.
+            // RGB stripes: hue rotation for tracked Titan materials.
             try { RgbAnimator.Tick(); } catch (Exception ex) { Log.Error("RGB tick failed.", ex); }
 
             try
@@ -238,7 +238,7 @@ namespace GregMod.Backplanes
             try
             {
                 gregCore.Core.Mods.GregModRegistry.Register(
-                    "gregMod.Backplanes", "Backplanes", "2.2.3",
+                    "gregMod.Backplanes", "Backplanes", "2.3.0",
                     new string[] { "backplanes" });
             }
             catch (Exception ex)

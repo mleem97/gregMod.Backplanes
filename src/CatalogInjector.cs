@@ -410,8 +410,8 @@ namespace GregMod.Backplanes
 
         // Vanilla-Shop-Reihen zeigen nur ~5 Karten (Rest wird geclippt).
         // Reflow: aktive ShopItem-Kinder in 5er-Chunks auf Overflow-Reihen
-        // verteilen (Reihe klonen, Kinder umhängen). Idempotent: zuerst alte
-        // Overflow-Reihen zurückmergen, dann neu chunken.
+        // distribute (clone row, reparent children). Idempotent: first merge
+        // old overflow rows back, then re-chunk.
         private const int MaxCardsPerRow = 5;
         private const string OverflowSuffix = " Overflow";
 
@@ -458,7 +458,7 @@ namespace GregMod.Backplanes
                     return;
                 }
 
-                // Reihen direkt einsammeln (kein shop.shopItemParent nötig).
+                // Collect rows directly (no shop.shopItemParent needed).
                 var rowsById = new System.Collections.Generic.Dictionary<int, Transform>();
                 var scopes = new System.Collections.Generic.HashSet<int>();
                 var scopeById = new System.Collections.Generic.Dictionary<int, Transform>();
@@ -670,7 +670,7 @@ namespace GregMod.Backplanes
             try { rowName = row.gameObject != null ? row.gameObject.name ?? "" : ""; } catch { }
             if (rowName.EndsWith(OverflowSuffix, StringComparison.Ordinal)) return;
 
-            // 1) Alte Overflow-Reihen dieser Familie zurückmergen + löschen.
+            // 1) Merge back + delete old overflow rows of this family.
             var overflowRows = new System.Collections.Generic.List<Transform>();
             try
             {
@@ -696,7 +696,7 @@ namespace GregMod.Backplanes
                 try
                 {
                     // Sofort unsichtbar (Destroy wirkt erst am Frame-Ende;
-                    // schlägt es fehl, bleibt sonst eine leere Reihe stehen).
+                    // if it fails, an empty row would remain).
                     try { ov.gameObject.SetActive(false); } catch { }
                     var kids = new System.Collections.Generic.List<Transform>();
                     try
@@ -751,7 +751,7 @@ namespace GregMod.Backplanes
 
             if (cards.Count <= MaxCardsPerRow)
             {
-                Log.Info($"Reflow '{rowName}': {cards.Count} aktive Karten, kein Umbruch nötig.");
+                Log.Info($"Reflow '{rowName}': {cards.Count} active cards, no reflow needed.");
                 return;
             }
 
@@ -1268,7 +1268,7 @@ namespace GregMod.Backplanes
 
         /// <summary>
         /// Alle NICHT-Varianten-Server: freie Ports auf Tier-Speed heben
-        /// (Vanilla lässt sie bei 0.2 = 1 Gbps). Nur Speed, keine Flags/Typen.
+        /// (Vanilla leaves them at 0.2 = 1 Gbps). Speed only, no flags/types.
         /// Belegte Ports (Kabel/Modul) werden nie angefasst. Alle 30 s.
         /// </summary>
         private static void AuditVanillaPortSpeeds(
@@ -1379,8 +1379,8 @@ namespace GregMod.Backplanes
             return found;
         }
 
-        // Port-Zustand aufschlüsseln: Kabel-ID gesetzt? Modul live oder nur
-        // zerstörte Referenz (IL2CPP meldet tote Objekte als != null)?
+        // Break down port state: cable ID set? Module live or just
+        // a destroyed reference (IL2CPP reports dead objects as != null)?
         private static void GetPortState(CableLink link, out bool hasCable, out bool hasModule, out bool deadModuleRef)
         {
             hasCable = false;
@@ -1868,8 +1868,8 @@ namespace GregMod.Backplanes
                 // once — CableLink event postfixes re-assert the speed on drift.
                 try { if (link != null && spec != null) PortSpeedMemory.Register(link, spec.RuntimeNetworkSpeed); } catch { }
                 // Port in use (cable id assigned or live SFP module inserted):
-                // hands off — ausser ForcePortSpeed ist an. Zerstörte
-                // Modul-Refs (IL2CPP-Fake-Null) zählen als frei und werden
+                // hands off — unless ForcePortSpeed is on. Destroyed
+                // module refs (IL2CPP fake-null) count as free and are
                 // bereinigt, sonst bleibt jeder Port ewig "belegt".
                 bool force = false;
                 try { force = ModConfig.ForcePortSpeed; } catch { }
@@ -1898,9 +1898,9 @@ namespace GregMod.Backplanes
                 try { if (link.sfpTypeSupported != spec.SfpType) { link.sfpTypeSupported = spec.SfpType; changed = true; } } catch { /* best-effort */ }
                 // NIE sfpTypeInserted auf leeren Ports setzen: Das erzeugt ein
                 // Phantom-Modul (Typ gesetzt, aber insertedSFP == null). Das Spiel
-                // hält den Port dann für belegt (echte SFP+/SFP28-Module werden
+                // then treats the port as occupied (real SFP+/SFP28 modules get
                 // abgewiesen) und rendert kein Modell (nichts da). Umgekehrt:
-                // Altlasten früherer Versionen reparieren (gesetzt ohne Modul -> 0).
+                // Repair leftovers from older versions (set without module -> 0).
                 try
                 {
                     if (!hasModule && link.sfpTypeInserted != 0)

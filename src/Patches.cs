@@ -282,60 +282,6 @@ namespace GregMod.Backplanes
             }
         }
 
-        // ------------------------------------------------------- port speeds
-        // Event-driven (no polling): PortSpeedMemory holds our ports' target
-        // speeds; these postfixes re-assert on drift. Every real correction
-        // logs one line (hook, old -> new) — that IS the diagnostic showing
-        // which vanilla path rewrites speeds. No-drift calls stay silent.
-
-        [HarmonyPatch(typeof(CableLink), nameof(CableLink.SetConnectionSpeed))]
-        [HarmonyPostfix]
-        private static void CableLinkSetSpeedPostfix(CableLink __instance)
-        {
-            try
-            {
-                if (__instance == null) return;
-                PortSpeedMemory.Enforce(__instance, "SetConnectionSpeed");
-            }
-            catch { }
-        }
-
-        [HarmonyPatch(typeof(CableLink), nameof(CableLink.InsertSFP))]
-        [HarmonyPostfix]
-        private static void CableLinkInsertSFPPostfix(CableLink __instance)
-        {
-            try
-            {
-                if (__instance == null) return;
-                PortSpeedMemory.Enforce(__instance, "InsertSFP");
-            }
-            catch { }
-        }
-
-        [HarmonyPatch(typeof(CableLink), nameof(CableLink.InteractOnClick))]
-        [HarmonyPostfix]
-        private static void CableLinkInteractPostfix(CableLink __instance)
-        {
-            try
-            {
-                if (__instance == null) return;
-                PortSpeedMemory.Enforce(__instance, "InteractOnClick");
-            }
-            catch { }
-        }
-
-        [HarmonyPatch(typeof(CableLink), nameof(CableLink.SecondActionOnClick))]
-        [HarmonyPostfix]
-        private static void CableLinkSecondActionPostfix(CableLink __instance)
-        {
-            try
-            {
-                if (__instance == null) return;
-                PortSpeedMemory.Enforce(__instance, "SecondActionOnClick");
-            }
-            catch { }
-        }
-
         [HarmonyPatch(typeof(ComputerShop), "SpawnAllPurchasedItems")]
         [HarmonyPrefix]
         private static void SpawnAllPrefix(ComputerShop __instance)
