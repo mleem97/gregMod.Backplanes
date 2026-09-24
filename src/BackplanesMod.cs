@@ -263,9 +263,7 @@ namespace GregMod.Backplanes
             try
             {
                 gregCore.UI.GregHudRegistry.Register("backplanes", ModConfig.ToggleKey.ToString(), "Backplanes");
-                gregCore.UI.GregMenuRegistry.RegisterOpener("backplanes", () => BackplanesOverlay.Toggle());
-                gregCore.UI.GregMenuRegistry.RegisterCloser("backplanes",
-                    () => { try { if (BackplanesOverlay.IsVisible) BackplanesOverlay.Toggle(); } catch { /* best-effort */ } });
+                gregCore.UI.GregMenuBinding.BindToggle("backplanes", BackplanesOverlay.Toggle, () => BackplanesOverlay.IsVisible);
             }
             catch (Exception ex)
             {
