@@ -3,6 +3,7 @@ using Il2Cpp;
 using MelonLoader;
 using UnityEngine;
 using UnityEngine.InputSystem;
+[assembly: System.Runtime.CompilerServices.InternalsVisibleTo("ModCoverage.Tests")]
 
 [assembly: MelonInfo(typeof(GregMod.Backplanes.BackplanesMod), "gregMod.Backplanes", "2.3.1", "TeamGreg Modding")]
 [assembly: MelonGame("Waseku", "Data Center")]
