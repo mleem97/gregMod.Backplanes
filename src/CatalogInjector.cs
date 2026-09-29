@@ -2103,6 +2103,10 @@ namespace GregMod.Backplanes
                 if (spec == null || server == null || budget <= 0) return 0;
                 string srvName = "";
                 try { srvName = server.gameObject != null ? server.gameObject.name ?? "" : ""; } catch { }
+                string srvIp = "";
+                try { srvIp = server.IP ?? ""; } catch { }
+                int srvCustomer = -2;
+                try { srvCustomer = server.GetCustomerID(); } catch { }
                 foreach (var link in CollectServerLinks(server))
                 {
                     if (lines >= budget) break;
@@ -2111,6 +2115,11 @@ namespace GregMod.Backplanes
                     try { hasCable = link.cableIDsOnLink != 0; } catch { continue; }
                     try { hasModule = link.insertedSFP != null; } catch { }
                     if (!hasCable && !hasModule) continue;
+                    // Cabled but no server IP: the switch UI falls back to the
+                    // raw object name for this link (issue #19 pattern).
+                    if (hasCable && string.IsNullOrWhiteSpace(srvIp))
+                        Log.Warning($"Link audit {spec.VariantDisplayName} @{srvName}: cabled port with EMPTY server IP " +
+                                    $"(customer={srvCustomer}) — switch UI will show the raw server name.");
                     float portGbps = -1f;
                     try { portGbps = link.connectionSpeed * 5f; } catch { }
                     string modText = "no";
@@ -2137,7 +2146,8 @@ namespace GregMod.Backplanes
                     catch { /* best-effort */ }
                     lines++;
                     Log.Info($"Link audit {spec.VariantDisplayName} @{srvName}: port={portGbps:0.##}Gbps " +
-                        $"cable={(hasCable ? "yes" : "no")} module={modText} -> {far}");
+                        $"cable={(hasCable ? "yes" : "no")} module={modText} ip={(string.IsNullOrWhiteSpace(srvIp) ? "-" : srvIp)} " +
+                        $"customer={srvCustomer} -> {far}");
                 }
             }
             catch { /* audit best-effort */ }
@@ -2198,10 +2208,45 @@ namespace GregMod.Backplanes
             {
                 float speed;
                 try { speed = server.maxProcessingSpeed; } catch { return null; }
+                ServerVariantSpec first = null;
+                int matches = 0;
                 foreach (var spec in ServerVariantSpec.All)
                 {
-                    if (Approx(speed, spec.RuntimeProcessingSpeed)) return spec;
+                    if (Approx(speed, spec.RuntimeProcessingSpeed)) { first = spec; matches++; }
                 }
+                if (matches <= 1) return first;
+                // Ambiguous: several families share this IOPS tier (e.g. 500K).
+                // First-match would misconfigure ports (wrong sfpType/speed) and
+                // the game then fails to resolve the link (raw server name / no
+                // IP in the switch UI — see issue #19). Disambiguate by base model.
+                string haystack = "";
+                try { haystack = server.gameObject != null ? server.gameObject.name ?? "" : ""; } catch { }
+                try
+                {
+                    string sid = ReadServerId(server);
+                    if (!string.IsNullOrEmpty(sid)) haystack += " " + sid;
+                }
+                catch { }
+                ServerVariantSpec tokenMatch = null;
+                int tokenMatches = 0;
+                foreach (var spec in ServerVariantSpec.All)
+                {
+                    if (!Approx(speed, spec.RuntimeProcessingSpeed)) continue;
+                    string token = "";
+                    try { token = spec.BaseRuntimeToken; } catch { }
+                    if (string.IsNullOrEmpty(token)) continue;
+                    if (haystack.IndexOf(token, StringComparison.OrdinalIgnoreCase) >= 0)
+                    { tokenMatch = spec; tokenMatches++; }
+                }
+                if (tokenMatches == 1)
+                {
+                    Log.Info($"Tier {speed} ambiguous ({matches} specs) — resolved by base model " +
+                             $"'{tokenMatch.BaseRuntimeToken}' for '{haystack.Trim()}'.");
+                    return tokenMatch;
+                }
+                Log.Warning($"Tier {speed} ambiguous ({matches} specs, {tokenMatches} base-model matches) " +
+                            $"for '{haystack.Trim()}' — NOT configuring (would risk wrong ports). " +
+                            "Place via shop purchase or reload with sidecar markers.");
                 return null;
             }
             catch { return null; }

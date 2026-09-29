@@ -2,6 +2,19 @@
 
 Format: [Keep a Changelog](https://keepachangelog.com/de/1.0.0/).
 
+## [Unreleased]
+
+### Fixed
+
+- Issue #19 (last server on rack shows raw name / no IP in switch UI):
+  `InferSpecBySpeedTier` no longer takes the first speed match when several
+  families share an IOPS tier — it disambiguates by base model from the
+  server name, and refuses to configure (with a warning) instead of applying
+  wrong ports when still ambiguous. Misconfigured ports degraded the link so
+  the game could not resolve the server IP.
+- Link audit now reports server IP + customer per connected port and warns on
+  cabled ports with empty server IP (the exact #19 pattern) for diagnosis.
+
 ## [2.3.1] — 2026-09-24
 
 ### Changed
