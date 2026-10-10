@@ -1055,6 +1055,9 @@ namespace GregMod.Backplanes
                 }
                 if (ModConfig.VerboseLogging || configured > 0)
                     Log.Info($"Configured spawned {spec.VariantDisplayName} uid {uid}: {configured} server(s).");
+                // This unit resolves by pointer when racked, so its pending entry
+                // would never be consumed and could later boost a plain server.
+                if (configured > 0) RemoveOnePendingSpec(spec);
             }
             catch (Exception ex)
             {
@@ -2326,6 +2329,18 @@ namespace GregMod.Backplanes
                 }
                 if (_checkoutExpectedUnits > 0)
                     Log.Info($"Checkout-Snapshot: {_checkoutExpectedUnits} Boosted-Unit(s) in Cart-Reihenfolge erwartet.");
+
+                // Pending purchases are queued at Buy-click (add to cart), not at
+                // checkout, and never removed when the item leaves the cart. Left
+                // over, they boosted the next plain server of the same model racked
+                // within 10 min. The cart at checkout is what was actually bought:
+                // rebuild the pending queue from it.
+                int stale = _pendingInsertions.Count;
+                _pendingInsertions.Clear();
+                foreach (var spec in _checkoutSpecQueue)
+                    _pendingInsertions.Enqueue(new PendingInsertion { Spec = spec, CreatedAt = DateTime.UtcNow });
+                if (stale != _pendingInsertions.Count)
+                    Log.Info($"Pending purchases reconciled with checkout: {stale} -> {_pendingInsertions.Count}.");
             }
             catch (Exception ex) { Log.Warning("Checkout-Snapshot failed: " + ex.Message); }
         }
@@ -2447,34 +2462,8 @@ namespace GregMod.Backplanes
                 RemoveOnePendingSpec(nameOnlyFallback);
                 return nameOnlyFallback;
             }
-            if (match == null)
-            {
-                // Letzter Fallback: aeltester gueltiger Pending-Kauf (FIFO).
-                // Greift wenn Identitaet unkenntlich ist (z.B. Fremd-Rename wie
-                // gregID:Server:...). Bewusst laut, damit Fehl-Zuordnungen
-                // im Log sichtbar sind.
-                DateTime now2 = DateTime.UtcNow;
-                ServerVariantSpec oldest = null;
-                DateTime oldestAt = DateTime.MaxValue;
-                foreach (var pending in _pendingInsertions)
-                {
-                    if (now2 - pending.CreatedAt > TimeSpan.FromMinutes(10)) continue;
-                    if (pending.CreatedAt < oldestAt)
-                    {
-                        oldestAt = pending.CreatedAt;
-                        oldest = pending.Spec;
-                    }
-                }
-                if (oldest != null)
-                {
-                    string srv = "";
-                    try { srv = server.gameObject != null ? server.gameObject.name ?? "" : ""; } catch { }
-                    Log.Warning($"Nutze FIFO-Fallback {oldest.VariantDisplayName} " +
-                        $"fuer Insert '{srv}' (kein Match moeglich).");
-                    RemoveOnePendingSpec(oldest);
-                    return oldest;
-                }
-            }
+            // No FIFO fallback: handing the oldest pending purchase to a server
+            // that doesn't match it turned plain servers into boosted ones.
             return match;
         }
 
